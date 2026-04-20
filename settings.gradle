@@ -1,0 +1,13 @@
+rootProject.name = 'pulsar-backend'
+
+include ':kernel'
+include ':host-app'
+include ':modules:scheduling'
+include ':modules:payroll'
+include ':modules:hr'
+include ':modules:inventory'
+include ':modules:crm'
+include ':modules:invoicing'
+include ':modules:content'
+include ':modules:automation'
+include ':modules:ai-notes'
