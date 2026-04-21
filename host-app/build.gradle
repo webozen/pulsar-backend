@@ -1,0 +1,26 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+dependencies {
+    implementation project(':kernel')
+    implementation project(':modules:scheduling')
+    implementation project(':modules:payroll')
+    implementation project(':modules:hr')
+    implementation project(':modules:inventory')
+    implementation project(':modules:crm')
+    implementation project(':modules:invoicing')
+    implementation project(':modules:content')
+    implementation project(':modules:automation')
+    implementation project(':modules:ai-notes')
+    implementation project(':modules:translate')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0'
+
+    // For AuthControllerRefreshTest: hand-build expired tokens to verify the refresh
+    // endpoint's grace-window behavior. jjwt is already a transitive runtime dep via
+    // :kernel; we only need the API surface visible at test compile time.
+    testImplementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    testRuntimeOnly    'io.jsonwebtoken:jjwt-impl:0.12.6'
+    testRuntimeOnly    'io.jsonwebtoken:jjwt-jackson:0.12.6'
+}

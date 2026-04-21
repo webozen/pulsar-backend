@@ -1,5 +1,9 @@
 server:
   port: 8080
+  tomcat:
+    websocket:
+      max-text-message-buffer-size: 1048576   # 1MB — handles large JWTs + audio JSON
+      max-binary-message-buffer-size: 1048576
 
 spring:
   application:
@@ -30,8 +34,6 @@ pulsar:
   jwt:
     secret: ${PULSAR_JWT_SECRET:dev-secret-change-me-please-32bytes-minimum-abcdefgh}
     ttl-seconds: 3600
-  domain:
-    base: localhost
   mysql:
     base-jdbc-url: jdbc:mysql://localhost:3316
     user: root
