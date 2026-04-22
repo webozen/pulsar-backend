@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "description": "Shared JWT fixtures for jjwt (backend) and jsonwebtoken (flow-platform) cross-lib verification.",
+  "cases": [
+    {
+      "name": "admin-hs256",
+      "secret": "pulsar-jwt-contract-test-secret-2026-fixtures-fixed-abcd",
+      "algorithm": "HS256",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJzdXBlcl9hZG1pbiIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjo5OTk5OTk5OTk5fQ.C_M_KACfBpeVoTV3nnZffrcDVwVc0oiTtTL7ziO1qXw",
+      "expected": {
+        "sub": "admin",
+        "role": "super_admin"
+      }
+    },
+    {
+      "name": "tenant-hs384",
+      "secret": "pulsar-jwt-contract-test-secret-2026-fixtures-fixed-abcd",
+      "algorithm": "HS384",
+      "token": "eyJhbGciOiJIUzM4NCIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZUBhY21lLnRlc3QiLCJzbHVnIjoiYWNtZSIsImVtYWlsIjoiYWxpY2VAYWNtZS50ZXN0Iiwicm9sZSI6InRlbmFudF91c2VyIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjk5OTk5OTk5OTl9.FbUvibKUIgN41wTogXQH_mNpTU8DFSxdnc40wGCYaDNvL0z0uFbvbP-vafMNo3uw",
+      "expected": {
+        "sub": "alice@acme.test",
+        "slug": "acme",
+        "email": "alice@acme.test",
+        "role": "tenant_user"
+      }
+    },
+    {
+      "name": "tenant-hs512",
+      "secret": "pulsar-jwt-contract-test-secret-2026-fixtures-fixed-abcd0123456789abcdef",
+      "algorithm": "HS512",
+      "token": "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJib2JAYmV0YS50ZXN0Iiwic2x1ZyI6ImJldGEiLCJlbWFpbCI6ImJvYkBiZXRhLnRlc3QiLCJyb2xlIjoidGVuYW50X3VzZXIiLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6OTk5OTk5OTk5OX0.dvXVoJKjenKmw4XLSPzlTr9o4QJxe1HCjxcuVT6wj6pvMVBQAvE9GsY2DPQhgv-cn7pRyH-h3FixEPJCmnKScg",
+      "expected": {
+        "sub": "bob@beta.test",
+        "slug": "beta",
+        "email": "bob@beta.test",
+        "role": "tenant_user"
+      }
+    }
+  ]
+}

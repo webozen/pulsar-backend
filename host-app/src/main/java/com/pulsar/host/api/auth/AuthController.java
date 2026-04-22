@@ -57,11 +57,16 @@ public class AuthController {
     public record TokenResponse(String token) {}
 
     @PostMapping("/admin/login")
-    public ResponseEntity<?> adminLogin(@RequestBody AdminLoginRequest req) {
+    public ResponseEntity<?> adminLogin(@RequestBody AdminLoginRequest req, HttpServletRequest httpReq) {
         if (!auth.verifyAdmin(req.passcode())) {
             return ResponseEntity.status(401).body(Map.of("error", "invalid_passcode"));
         }
-        return ResponseEntity.ok(new TokenResponse(jwt.issueAdmin()));
+        String token = jwt.issueAdmin();
+        // Mirror tenantLogin: also drop the same-origin cookie so admin UIs served
+        // alongside the tenant app can hand off auth without separate token plumbing.
+        return ResponseEntity.ok()
+            .header(HttpHeaders.SET_COOKIE, buildJwtCookie(token, httpReq).toString())
+            .body(new TokenResponse(token));
     }
 
     @PostMapping("/tenant/login")

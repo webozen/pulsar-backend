@@ -3,7 +3,6 @@ package com.pulsar.host.api.admin;
 import com.pulsar.kernel.auth.JwtService;
 import com.pulsar.kernel.module.ModuleRegistry;
 import com.pulsar.kernel.tenant.MigrationRunner;
-import com.pulsar.kernel.tenant.TenantLookupService;
 import com.pulsar.kernel.tenant.TenantProvisioningService;
 import com.pulsar.kernel.tenant.TenantRecord;
 import com.pulsar.kernel.tenant.TenantRepository;
@@ -36,7 +35,6 @@ import org.springframework.http.HttpStatus;
 public class AdminTenantsController {
     private final TenantRepository repo;
     private final TenantProvisioningService provisioning;
-    private final TenantLookupService lookup;
     private final ModuleRegistry modules;
     private final MigrationRunner migrations;
     private final JwtService jwt;
@@ -44,14 +42,12 @@ public class AdminTenantsController {
     public AdminTenantsController(
         TenantRepository repo,
         TenantProvisioningService provisioning,
-        TenantLookupService lookup,
         ModuleRegistry modules,
         MigrationRunner migrations,
         JwtService jwt
     ) {
         this.repo = repo;
         this.provisioning = provisioning;
-        this.lookup = lookup;
         this.modules = modules;
         this.migrations = migrations;
         this.jwt = jwt;
@@ -81,7 +77,6 @@ public class AdminTenantsController {
         }
         String passcode = TenantProvisioningService.generatePasscode();
         TenantRecord rec = provisioning.create(req.slug(), req.name(), req.contactEmail(), passcode);
-        lookup.invalidate(req.slug());
         return ResponseEntity.ok(new CreateTenantResponse(TenantDto.of(rec), passcode));
     }
 
@@ -99,7 +94,6 @@ public class AdminTenantsController {
         for (String m : added) {
             migrations.migrateModule(existing.dbName(), modules.get(m));
         }
-        lookup.invalidate(existing.slug());
         return TenantDto.of(repo.findById(id).orElseThrow());
     }
 
@@ -109,7 +103,6 @@ public class AdminTenantsController {
         TenantRecord existing = repo.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         String passcode = TenantProvisioningService.generatePasscode();
         repo.updatePasscode(id, passcode);
-        lookup.invalidate(existing.slug());
         return Map.of("passcode", passcode);
     }
 
@@ -150,7 +143,6 @@ public class AdminTenantsController {
         AdminGuard.requireAdmin();
         TenantRecord existing = repo.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         repo.setSuspended(id, true);
-        lookup.invalidate(existing.slug());
         return TenantDto.of(repo.findById(id).orElseThrow());
     }
 
@@ -159,7 +151,6 @@ public class AdminTenantsController {
         AdminGuard.requireAdmin();
         TenantRecord existing = repo.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         repo.setSuspended(id, false);
-        lookup.invalidate(existing.slug());
         return TenantDto.of(repo.findById(id).orElseThrow());
     }
 
