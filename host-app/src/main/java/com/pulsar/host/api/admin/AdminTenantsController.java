@@ -4,6 +4,7 @@ import com.pulsar.kernel.auth.JwtService;
 import com.pulsar.kernel.module.ModuleRegistry;
 import com.pulsar.kernel.tenant.MigrationRunner;
 import com.pulsar.kernel.tenant.TenantProvisioningService;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import com.pulsar.kernel.tenant.TenantRecord;
 import com.pulsar.kernel.tenant.TenantRepository;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,19 +39,22 @@ public class AdminTenantsController {
     private final ModuleRegistry modules;
     private final MigrationRunner migrations;
     private final JwtService jwt;
+    private final BCryptPasswordEncoder encoder;
 
     public AdminTenantsController(
         TenantRepository repo,
         TenantProvisioningService provisioning,
         ModuleRegistry modules,
         MigrationRunner migrations,
-        JwtService jwt
+        JwtService jwt,
+        BCryptPasswordEncoder encoder
     ) {
         this.repo = repo;
         this.provisioning = provisioning;
         this.modules = modules;
         this.migrations = migrations;
         this.jwt = jwt;
+        this.encoder = encoder;
     }
 
     public record CreateTenantRequest(
@@ -101,9 +105,9 @@ public class AdminTenantsController {
     public Map<String, String> regeneratePasscode(@PathVariable long id) {
         AdminGuard.requireAdmin();
         TenantRecord existing = repo.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-        String passcode = TenantProvisioningService.generatePasscode();
-        repo.updatePasscode(id, passcode);
-        return Map.of("passcode", passcode);
+        String plaintext = TenantProvisioningService.generatePasscode();
+        repo.updatePasscodeHash(id, encoder.encode(plaintext));
+        return Map.of("passcode", plaintext);
     }
 
     @PostMapping("/{id}/impersonate")

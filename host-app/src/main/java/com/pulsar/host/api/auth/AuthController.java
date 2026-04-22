@@ -71,7 +71,10 @@ public class AuthController {
 
     @PostMapping("/tenant/login")
     public ResponseEntity<?> tenantLogin(@RequestBody TenantLoginRequest req, HttpServletRequest httpReq) {
-        Optional<TenantRecord> t = auth.verifyTenant(req.slug(), req.passcode());
+        // All three of {slug, email, passcode} must match the stored row. Email is
+        // verified in PasscodeAuthService alongside the passcode so there's no enumeration
+        // window for valid-email / wrong-passcode vs. invalid-email / any-passcode.
+        Optional<TenantRecord> t = auth.verifyTenant(req.slug(), req.email(), req.passcode());
         if (t.isEmpty()) return ResponseEntity.status(401).body(Map.of("error", "invalid_credentials"));
         String token = jwt.issueTenant(req.slug(), req.email());
 
@@ -90,6 +93,27 @@ public class AuthController {
      * a 5-minute grace window past expiry, and issues a new token with fresh iat/exp preserving
      * role/slug/email/sub. No DB writes, no user lookup.
      */
+    /**
+     * Discard the caller's session cookie. We can't invalidate the bearer token
+     * itself (stateless JWT), but clearing the cookie stops same-origin apps
+     * (e.g. the /automation Next service) from sending it on future requests,
+     * which is sufficient for browser-based sign-out. The token's TTL still
+     * caps any residual exposure if the client kept a copy.
+     */
+    @PostMapping("/auth/logout")
+    public ResponseEntity<?> logout(HttpServletRequest httpReq) {
+        ResponseCookie cookie = ResponseCookie.from("pulsar_jwt", "")
+            .httpOnly(true)
+            .path("/")
+            .sameSite("Lax")
+            .secure(isHttps(httpReq))
+            .maxAge(0)
+            .build();
+        return ResponseEntity.ok()
+            .header(HttpHeaders.SET_COOKIE, cookie.toString())
+            .body(Map.of("status", "ok"));
+    }
+
     @PostMapping("/auth/refresh")
     public ResponseEntity<?> refresh(HttpServletRequest httpReq) {
         String token = extractToken(httpReq);

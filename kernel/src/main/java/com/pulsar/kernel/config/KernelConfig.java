@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -13,6 +14,16 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
 public class KernelConfig {
+
+    /**
+     * Passcode hasher used for tenant access passcodes. Cost factor 10 = ~50 ms
+     * per verify on commodity hardware, a reasonable ceiling for an unauthenticated
+     * login endpoint while still making offline brute-force expensive.
+     */
+    @Bean
+    public BCryptPasswordEncoder bcryptPasswordEncoder() {
+        return new BCryptPasswordEncoder(10);
+    }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtFilter jwt) throws Exception {

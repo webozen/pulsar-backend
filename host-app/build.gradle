@@ -16,6 +16,8 @@ dependencies {
     implementation project(':modules:translate')
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.springframework.security:spring-security-crypto'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0'
 
     // For AuthControllerRefreshTest: hand-build expired tokens to verify the refresh

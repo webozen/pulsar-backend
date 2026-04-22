@@ -7,6 +7,7 @@ import java.util.Set;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -19,25 +20,29 @@ public class TenantProvisioningService {
     private final String password;
     private final TenantRepository repo;
     private final MigrationRunner migrations;
+    private final BCryptPasswordEncoder encoder;
 
     public TenantProvisioningService(
         @Value("${pulsar.mysql.base-jdbc-url}") String baseUrl,
         @Value("${pulsar.mysql.user}") String user,
         @Value("${pulsar.mysql.password}") String password,
         TenantRepository repo,
-        MigrationRunner migrations
+        MigrationRunner migrations,
+        BCryptPasswordEncoder encoder
     ) {
         this.rootUrl = baseUrl + "/?useSSL=false&allowPublicKeyRetrieval=true";
         this.user = user;
         this.password = password;
         this.repo = repo;
         this.migrations = migrations;
+        this.encoder = encoder;
     }
 
-    public TenantRecord create(String slug, String name, String contactEmail, String passcode) {
+    /** @param plaintextPasscode The plaintext passcode. It is BCrypt-hashed before being written to the DB. */
+    public TenantRecord create(String slug, String name, String contactEmail, String plaintextPasscode) {
         String dbName = "pulsar_t_" + slug.replace('-', '_');
         createDatabase(dbName);
-        long id = repo.insert(slug, name, dbName, contactEmail, passcode);
+        long id = repo.insert(slug, name, dbName, contactEmail, encoder.encode(plaintextPasscode));
         TenantRecord rec = repo.findById(id).orElseThrow();
         migrations.migrateTenant(dbName, Set.of());
         return rec;

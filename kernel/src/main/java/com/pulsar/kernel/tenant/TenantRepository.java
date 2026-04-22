@@ -28,7 +28,7 @@ public class TenantRepository {
         rs.getString("db_name"),
         splitModules(rs.getString("active_modules")),
         rs.getString("contact_email"),
-        rs.getString("access_passcode"),
+        rs.getString("access_passcode_hash"),
         nullableInstant(rs.getTimestamp("suspended_at")),
         rs.getTimestamp("created_at").toInstant()
     );
@@ -59,11 +59,11 @@ public class TenantRepository {
         return n != null && n > 0;
     }
 
-    public long insert(String slug, String name, String dbName, String contactEmail, String passcode) {
+    public long insert(String slug, String name, String dbName, String contactEmail, String passcodeHash) {
         jdbc.update(
-            "INSERT INTO public_tenants (slug, name, db_name, active_modules, contact_email, access_passcode, created_at) " +
+            "INSERT INTO public_tenants (slug, name, db_name, active_modules, contact_email, access_passcode_hash, created_at) " +
             "VALUES (?, ?, ?, '', ?, ?, NOW())",
-            slug, name, dbName, contactEmail, passcode
+            slug, name, dbName, contactEmail, passcodeHash
         );
         Long id = jdbc.queryForObject("SELECT id FROM public_tenants WHERE slug = ?", Long.class, slug);
         return id == null ? 0L : id;
@@ -74,8 +74,8 @@ public class TenantRepository {
         jdbc.update("UPDATE public_tenants SET active_modules = ? WHERE id = ?", csv, id);
     }
 
-    public void updatePasscode(long id, String passcode) {
-        jdbc.update("UPDATE public_tenants SET access_passcode = ? WHERE id = ?", passcode, id);
+    public void updatePasscodeHash(long id, String passcodeHash) {
+        jdbc.update("UPDATE public_tenants SET access_passcode_hash = ? WHERE id = ?", passcodeHash, id);
     }
 
     public void setSuspended(long id, boolean suspended) {
