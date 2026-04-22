@@ -2,18 +2,64 @@ plugins {
     id 'org.springframework.boot'
 }
 
+/*
+ * Build-time domain profile. Selects which modules compile into the bootJar.
+ *
+ *   ./gradlew :host-app:bootJar                  → generic (default)
+ *   ./gradlew :host-app:bootJar -Pdomain=dental  → generic + dental modules
+ *   ./gradlew :host-app:bootJar -Pdomain=realtor → generic + realtor modules
+ *
+ * Add a new domain: add a key to `domainModules` below and register each
+ * module path in settings.gradle with `include ':modules:<name>'`.
+ *
+ * `generic` modules ALWAYS ship — scheduling/content/ai-notes/etc. are what
+ * every Pulsar deployment needs. Domain profiles layer extras on top.
+ */
+def domainModules = [
+    generic: [
+        ':modules:scheduling',
+        ':modules:payroll',
+        ':modules:hr',
+        ':modules:inventory',
+        ':modules:crm',
+        ':modules:invoicing',
+        ':modules:content',
+        ':modules:automation',
+        ':modules:ai-notes',
+        ':modules:translate',
+    ],
+    dental: [
+        ':modules:opendental',
+    ],
+    realtor: [
+        // placeholder — :modules:mls-sync, :modules:listing-cma, etc.
+    ],
+    salon: [
+        // placeholder
+    ],
+]
+
+def activeDomain = (project.findProperty('domain') ?: 'generic').toString()
+if (!domainModules.containsKey(activeDomain)) {
+    throw new GradleException("Unknown domain '${activeDomain}'. Valid: ${domainModules.keySet()}")
+}
+logger.lifecycle("[host-app] building for domain='${activeDomain}'")
+
+bootJar {
+    archiveFileName = "host-app-${activeDomain}-${project.version}.jar"
+}
+
 dependencies {
     implementation project(':kernel')
-    implementation project(':modules:scheduling')
-    implementation project(':modules:payroll')
-    implementation project(':modules:hr')
-    implementation project(':modules:inventory')
-    implementation project(':modules:crm')
-    implementation project(':modules:invoicing')
-    implementation project(':modules:content')
-    implementation project(':modules:automation')
-    implementation project(':modules:ai-notes')
-    implementation project(':modules:translate')
+
+    // Always-on generic modules
+    domainModules.generic.each { implementation project(it) }
+
+    // Layer in domain-specific modules when a non-generic profile is active.
+    if (activeDomain != 'generic') {
+        domainModules[activeDomain].each { implementation project(it) }
+    }
+
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'

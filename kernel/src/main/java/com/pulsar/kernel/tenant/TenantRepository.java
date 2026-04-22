@@ -29,9 +29,14 @@ public class TenantRepository {
         splitModules(rs.getString("active_modules")),
         rs.getString("contact_email"),
         rs.getString("access_passcode_hash"),
+        rs.getString("branding"),
         nullableInstant(rs.getTimestamp("suspended_at")),
         rs.getTimestamp("created_at").toInstant()
     );
+
+    public void updateBranding(long id, String brandingJson) {
+        jdbc.update("UPDATE public_tenants SET branding = ? WHERE id = ?", brandingJson, id);
+    }
 
     private static Set<String> splitModules(String csv) {
         if (csv == null || csv.isBlank()) return Set.of();

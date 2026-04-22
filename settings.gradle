@@ -12,3 +12,7 @@ include ':modules:content'
 include ':modules:automation'
 include ':modules:ai-notes'
 include ':modules:translate'
+
+// Domain-specific modules — compiled into the jar only when the matching
+// -Pdomain=<name> profile is passed to bootJar (see host-app/build.gradle).
+include ':modules:opendental'    // dental
