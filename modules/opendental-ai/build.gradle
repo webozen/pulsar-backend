@@ -1,0 +1,19 @@
+/*
+ * Dental-specific AI analytics module — conversational answers about a tenant's
+ * Open Dental practice, powered by Gemini 3.1 Live function calling.
+ * Ships only in the dental domain jar (see host-app/build.gradle).
+ */
+ext { domainTag = 'dental' }
+
+dependencies {
+    implementation project(':kernel')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    runtimeOnly    'io.jsonwebtoken:jjwt-impl:0.12.6'
+    runtimeOnly    'io.jsonwebtoken:jjwt-jackson:0.12.6'
+}

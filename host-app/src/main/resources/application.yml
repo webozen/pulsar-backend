@@ -25,6 +25,10 @@ spring:
     create-schemas: true
 
 pulsar:
+  # Set by the nssm service env (bootstrap.sh passes --domain=<name>). Decides
+  # which theme under classpath:branding/<domain>/ is served as the domain
+  # fallback by BrandingController. Defaults to 'generic' if unset.
+  domain: ${PULSAR_DOMAIN:generic}
   admin:
     passcode: ${PULSAR_ADMIN_PASSCODE:PULS-DEV-0000}
   jwt:

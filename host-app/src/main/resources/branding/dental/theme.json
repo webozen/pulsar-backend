@@ -1,0 +1,10 @@
+{
+  "appName": "Pulsar Dental",
+  "logoUrl": "/branding/dental/logo.svg",
+  "primaryColor": "#2ba7ff",
+  "accentColor": "#007acc",
+  "copy": {
+    "users": "patients",
+    "workspace": "practice"
+  }
+}

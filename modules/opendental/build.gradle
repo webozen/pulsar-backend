@@ -1,0 +1,14 @@
+/*
+ * Dental-specific module. Ships only in the dental-domain jar
+ * (see host-app/build.gradle `domainModules['dental']`).
+ *
+ * At runtime this module is still gated by @RequireModule("opendental") —
+ * a tenant on the dental deployment has to explicitly activate it via the
+ * admin UI before the endpoints become reachable.
+ */
+ext { domainTag = 'dental' }
+
+dependencies {
+    implementation project(':kernel')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+}

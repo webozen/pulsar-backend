@@ -1,0 +1,10 @@
+{
+  "appName": "Pulsar",
+  "logoUrl": "/branding/generic/logo.svg",
+  "primaryColor": "#1d5eff",
+  "accentColor": "#3d7aff",
+  "copy": {
+    "users": "users",
+    "workspace": "workspace"
+  }
+}
