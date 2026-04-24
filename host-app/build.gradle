@@ -30,6 +30,7 @@ def domainModules = [
     ],
     dental: [
         ':modules:opendental',
+        ':modules:opendental-ai',
     ],
     realtor: [
         // placeholder — :modules:mls-sync, :modules:listing-cma, etc.
