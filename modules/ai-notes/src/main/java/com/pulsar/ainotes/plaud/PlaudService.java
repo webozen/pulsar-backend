@@ -33,7 +33,7 @@ public class PlaudService {
         PlaudClient client = client(plaudToken);
         List<Map<String, Object>> raw = client.listRecordings(limit, 0);
         List<Recording> all = raw.stream()
-            .map(m -> objectMapper.convertValue(m, Recording.class))
+            .map(Recording::fromPlaud)
             .toList();
         Instant cutoff = cutoff(window, since);
         if (cutoff == null) return all;
@@ -58,7 +58,7 @@ public class PlaudService {
         Instant cutoff = cutoff(window, since);
         List<FeedItem> out = new ArrayList<>();
         for (Map<String, Object> rawMeta : rawList) {
-            Recording rec = objectMapper.convertValue(rawMeta, Recording.class);
+            Recording rec = Recording.fromPlaud(rawMeta);
             if (cutoff != null && rec.createdAt() != null && rec.createdAt().isBefore(cutoff)) continue;
             TranscriptResponse transcript = null;
             SummaryResponse summary = null;

@@ -1,0 +1,23 @@
+/*
+ * Call Co-Pilot — silent agent-assist that listens to a live voice call,
+ * understands the patient's questions, and surfaces fact cards / suggested
+ * actions to the staff member's screen. Reuses the OpenDental tool surface
+ * from opendental-ai for patient lookups; provider-neutral via kernel/voice.
+ *
+ * Dental-domain for now (tool set is dental-specific). When tool sets become
+ * domain-pluggable this module moves to generic.
+ */
+ext { domainTag = 'dental' }
+
+dependencies {
+    implementation project(':kernel')
+    implementation project(':modules:opendental-ai')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    runtimeOnly    'io.jsonwebtoken:jjwt-impl:0.12.6'
+    runtimeOnly    'io.jsonwebtoken:jjwt-jackson:0.12.6'
+}

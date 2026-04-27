@@ -3,8 +3,11 @@ package com.pulsar.opendentalai;
 import com.pulsar.kernel.security.RequireModule;
 import com.pulsar.kernel.tenant.TenantContext;
 import com.pulsar.kernel.tenant.TenantDataSources;
+import com.pulsar.kernel.tenant.TenantRepository;
+import com.pulsar.kernel.tenant.events.TenantEvents;
 import jakarta.validation.constraints.NotBlank;
 import java.util.Map;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,9 +26,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class OpendentalAiOnboardingController {
 
     private final TenantDataSources tenantDs;
+    private final TenantRepository tenantRepo;
+    private final ApplicationEventPublisher events;
 
-    public OpendentalAiOnboardingController(TenantDataSources tenantDs) {
+    public OpendentalAiOnboardingController(
+        TenantDataSources tenantDs,
+        TenantRepository tenantRepo,
+        ApplicationEventPublisher events
+    ) {
         this.tenantDs = tenantDs;
+        this.tenantRepo = tenantRepo;
+        this.events = events;
     }
 
     public record ConfigRequest(
@@ -53,6 +64,17 @@ public class OpendentalAiOnboardingController {
             "od_developer_key = VALUES(od_developer_key), " +
             "od_customer_key = VALUES(od_customer_key)",
             req.geminiKey(), req.odDeveloperKey(), req.odCustomerKey()
+        );
+        // Push the same credentials to the workflow platform's namespace so
+        // dental Kestra flows (recall-reminder etc.) can use them as secrets.
+        tenantRepo.findBySlug(t.slug()).ifPresent(rec ->
+            events.publishEvent(new TenantEvents.TenantSecretsUpdated(
+                rec.id(), rec.slug(), Map.of(
+                    "GEMINI_API_KEY", req.geminiKey(),
+                    "OPENDENTAL_DEVELOPER_KEY", req.odDeveloperKey(),
+                    "OPENDENTAL_CUSTOMER_KEY", req.odCustomerKey()
+                )
+            ))
         );
         return Map.of("onboarded", true);
     }

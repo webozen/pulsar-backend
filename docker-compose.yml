@@ -1,0 +1,64 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: pulsar-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: pulsar
+      MYSQL_DATABASE: pulsar_platform
+    command:
+      - --default-authentication-plugin=caching_sha2_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3316:3306"
+    volumes:
+      - pulsar-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-ppulsar"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # The Spring Boot backend itself. Opt-in via the `backend` profile so
+  # the existing local dev story (`./gradlew :host-app:bootRun`) still
+  # works without competing with the container on port 18080. Bring
+  # everything up with: `docker compose --profile backend up -d`.
+  backend:
+    profiles: ["backend"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DOMAIN: dental
+    image: pulsar-backend:dental
+    container_name: pulsar-backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 18080
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/pulsar_platform?useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: pulsar
+      PULSAR_MYSQL_BASE_JDBC_URL: jdbc:mysql://mysql:3306
+      PULSAR_MYSQL_USER: root
+      PULSAR_MYSQL_PASSWORD: pulsar
+      # Dev-grade defaults; override at deploy time.
+      PULSAR_ADMIN_PASSCODE: ${PULSAR_ADMIN_PASSCODE:-PULS-DEV-0000}
+      PULSAR_JWT_SECRET: ${PULSAR_JWT_SECRET:-dev-secret-change-me-please-32bytes-minimum-abcdefgh}
+      PULSAR_AUTOMATION_BASE_URL: ${PULSAR_AUTOMATION_BASE_URL:-http://host.docker.internal:3002/automation}
+      PULSAR_AUTOMATION_SYNC_SECRET: ${PULSAR_AUTOMATION_SYNC_SECRET:-dev-sync-secret}
+      ANYTHINGLLM_URL: ${ANYTHINGLLM_URL:-http://host.docker.internal:3001}
+      ANYTHINGLLM_API_KEY: ${ANYTHINGLLM_API_KEY:-}
+    ports:
+      - "18080:18080"
+    extra_hosts:
+      # Lets the container reach the flow-platform Next.js app running
+      # on the host (during `npm run dev`). Linux hosts: docker provides
+      # this automatically when --add-host is set; macOS/Windows already
+      # resolve host.docker.internal natively.
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  pulsar-mysql-data:

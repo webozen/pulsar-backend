@@ -2,18 +2,26 @@ rootProject.name = 'pulsar-backend'
 
 include ':kernel'
 include ':host-app'
+include ':modules:automation-sync'  // generic — bridges Pulsar tenants to flow-platform
 include ':modules:scheduling'
 include ':modules:payroll'
 include ':modules:hr'
 include ':modules:inventory'
-include ':modules:crm'
 include ':modules:invoicing'
 include ':modules:content'
 include ':modules:automation'
 include ':modules:ai-notes'
 include ':modules:translate'
+include ':modules:voice-ringcentral'
+include ':modules:text-intel'        // generic — async SMS thread summarizer
+include ':modules:text-copilot'      // generic — live SMS reply suggestions
 
 // Domain-specific modules — compiled into the jar only when the matching
 // -Pdomain=<name> profile is passed to bootJar (see host-app/build.gradle).
 include ':modules:opendental'     // dental
 include ':modules:opendental-ai'  // dental
+include ':modules:caller-match'   // dental
+include ':modules:call-intel'     // dental
+include ':modules:copilot'        // dental
+include ':modules:call-handling'  // dental
+include ':modules:text-support'   // generic

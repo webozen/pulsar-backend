@@ -13,9 +13,13 @@ spring:
       max-file-size: 50MB
       max-request-size: 52MB
   datasource:
-    url: jdbc:mysql://localhost:3316/pulsar_platform?useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true
-    username: root
-    password: pulsar
+    # All three values are env-var-driven. No defaults — Spring fails to
+    # start with a clear "Could not resolve placeholder" error if any are
+    # missing. Local dev: source pulsar-backend/.env (see .env.example).
+    # Container path: docker-compose.yml sets them on the backend service.
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   flyway:
     enabled: true
@@ -35,9 +39,11 @@ pulsar:
     secret: ${PULSAR_JWT_SECRET:dev-secret-change-me-please-32bytes-minimum-abcdefgh}
     ttl-seconds: 3600
   mysql:
-    base-jdbc-url: jdbc:mysql://localhost:3316
-    user: root
-    password: pulsar
+    # Per-tenant DB pool credentials — env-var-driven, no defaults. Same
+    # rationale as spring.datasource above.
+    base-jdbc-url: ${PULSAR_MYSQL_BASE_JDBC_URL}
+    user: ${PULSAR_MYSQL_USER}
+    password: ${PULSAR_MYSQL_PASSWORD}
   content:
     upload-dir: ${PULSAR_CONTENT_UPLOAD_DIR:./uploads}
   anythingllm:

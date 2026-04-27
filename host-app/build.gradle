@@ -21,16 +21,24 @@ def domainModules = [
         ':modules:payroll',
         ':modules:hr',
         ':modules:inventory',
-        ':modules:crm',
         ':modules:invoicing',
         ':modules:content',
         ':modules:automation',
+        ':modules:automation-sync',  // platform-wide bridge (always shipped)
         ':modules:ai-notes',
         ':modules:translate',
+        ':modules:voice-ringcentral', // RC adapter (always shipped — per-tenant onboarded)
+        ':modules:text-intel',        // SMS thread summarizer
+        ':modules:text-copilot',      // SMS reply suggestion API
+        ':modules:text-support',      // SMS inbox wrapper (text-intel + text-copilot)
     ],
     dental: [
         ':modules:opendental',
         ':modules:opendental-ai',
+        ':modules:caller-match',
+        ':modules:call-intel',
+        ':modules:copilot',
+        ':modules:call-handling',
     ],
     realtor: [
         // placeholder — :modules:mls-sync, :modules:listing-cma, etc.

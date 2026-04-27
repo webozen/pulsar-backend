@@ -3,6 +3,7 @@ package com.pulsar.opendentalai.opendental;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import okhttp3.MediaType;
@@ -43,11 +44,15 @@ public class OpendentalQueryClient {
         String endpoint = System.getenv().getOrDefault("OPENDENTAL_QUERY_ENDPOINT", DEFAULT_ENDPOINT);
         String body = mapper.writeValueAsString(Map.of("SqlCommand", req.sql()));
 
+        // OpenDental's Query API rejects a Content-Type with any parameter (e.g.
+        // "application/json; charset=utf-8"). OkHttp's String-body factory appends
+        // "; charset=utf-8" when the MediaType has no charset, so construct the
+        // body from raw UTF-8 bytes to keep the header exactly "application/json".
         Request httpReq = new Request.Builder()
             .url(endpoint)
             .addHeader("Authorization", "ODFHIR " + req.developerKey() + "/" + req.customerKey())
             .addHeader("Accept", "application/json")
-            .post(RequestBody.create(body, JSON))
+            .put(RequestBody.create(body.getBytes(StandardCharsets.UTF_8), JSON))
             .build();
 
         try (Response resp = http.newCall(httpReq).execute()) {

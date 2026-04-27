@@ -1,0 +1,20 @@
+/*
+ * Live SMS reply assistant. Stateless API: given a thread + a draft reply,
+ * Gemini returns 2-3 alternative phrasings tuned to the conversation context.
+ * Reads from text-intel's per-tenant message store (text_thread, text_message);
+ * sends via the kernel/text TextSender (RingCentral SMS today).
+ *
+ * Generic-domain — works for any business with SMS.
+ */
+ext { domainTag = 'generic' }
+
+dependencies {
+    implementation project(':kernel')
+    implementation project(':modules:text-intel')   // shares text_thread/text_message storage
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+}

@@ -1,0 +1,20 @@
+/*
+ * Dental caller-ID screen-pop module. On an inbound (or outbound) RingCentral
+ * call the frontend posts the phone number here, the module resolves it to a
+ * patient in the tenant's OpenDental database, and returns a summary card.
+ *
+ * Ships only in the dental jar (see host-app/build.gradle `domainModules['dental']`).
+ * Runtime-gated by @RequireModule("caller-match"). Reuses the OpenDental
+ * credentials onboarded via the opendental-ai module — there is no separate
+ * onboarding wizard for this module.
+ */
+ext { domainTag = 'dental' }
+
+dependencies {
+    implementation project(':kernel')
+    implementation project(':modules:opendental-ai')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+}

@@ -191,8 +191,8 @@ public class AuthController {
         if (dbName != null && !active.isEmpty()) {
             DataSource ds = tenantDs.forDb(dbName);
             for (String id : active) {
+                if (!modules.exists(id)) continue;
                 ModuleDefinition def = modules.get(id);
-                if (def == null) continue;
                 try {
                     onboarding.put(id, def.isOnboarded(ds));
                 } catch (Exception e) {
