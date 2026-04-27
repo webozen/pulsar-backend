@@ -1,0 +1,8 @@
+ext { domainTag = 'generic' }
+
+dependencies {
+    implementation project(':kernel')
+    implementation project(':modules:text-intel')
+    implementation project(':modules:text-copilot')
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+}

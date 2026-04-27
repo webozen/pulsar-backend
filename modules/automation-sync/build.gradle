@@ -1,0 +1,16 @@
+/*
+ * Bridge between Pulsar's tenant lifecycle and the workflow platform
+ * (pulsar-flow-platform-main + Kestra). Ships in EVERY domain build —
+ * not gated by `domainTag`. Every Pulsar deployment that wants its
+ * tenants reflected in the flow-platform needs this module.
+ *
+ * No @RequireModule gate on its admin endpoints; auth is admin-only via
+ * AdminGuard.
+ */
+dependencies {
+    implementation project(':kernel')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+}

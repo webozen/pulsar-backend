@@ -1,0 +1,63 @@
+name: test-pr
+
+# Gradle test on every PR + push to main. Boots a MySQL service so any
+# tests that touch the schema (or any future @SpringBootTest) work end
+# to end. Cancels older in-flight runs on the same ref to keep CI cheap.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: test-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gradle-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: pulsar
+          MYSQL_DATABASE: pulsar_platform
+        ports: ["3316:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -ppulsar"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      # Same shape as docker-compose.yml. application.yml has no defaults
+      # post-#3 — these env vars are required for the boot path.
+      SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3316/pulsar_platform?useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: pulsar
+      PULSAR_MYSQL_BASE_JDBC_URL: jdbc:mysql://localhost:3316
+      PULSAR_MYSQL_USER: root
+      PULSAR_MYSQL_PASSWORD: pulsar
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Gradle test (all modules)
+        run: ./gradlew test --no-daemon
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-reports
+          path: |
+            **/build/reports/tests/test/
+            **/build/test-results/test/
+          retention-days: 14

@@ -7,6 +7,8 @@ import com.pulsar.kernel.tenant.TenantProvisioningService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import com.pulsar.kernel.tenant.TenantRecord;
 import com.pulsar.kernel.tenant.TenantRepository;
+import com.pulsar.kernel.tenant.events.TenantEvents;
+import org.springframework.context.ApplicationEventPublisher;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
@@ -40,6 +42,7 @@ public class AdminTenantsController {
     private final MigrationRunner migrations;
     private final JwtService jwt;
     private final BCryptPasswordEncoder encoder;
+    private final ApplicationEventPublisher events;
 
     public AdminTenantsController(
         TenantRepository repo,
@@ -47,7 +50,8 @@ public class AdminTenantsController {
         ModuleRegistry modules,
         MigrationRunner migrations,
         JwtService jwt,
-        BCryptPasswordEncoder encoder
+        BCryptPasswordEncoder encoder,
+        ApplicationEventPublisher events
     ) {
         this.repo = repo;
         this.provisioning = provisioning;
@@ -55,6 +59,7 @@ public class AdminTenantsController {
         this.migrations = migrations;
         this.jwt = jwt;
         this.encoder = encoder;
+        this.events = events;
     }
 
     public record CreateTenantRequest(
@@ -98,7 +103,10 @@ public class AdminTenantsController {
         for (String m : added) {
             migrations.migrateModule(existing.dbName(), modules.get(m));
         }
-        return TenantDto.of(repo.findById(id).orElseThrow());
+        TenantRecord after = repo.findById(id).orElseThrow();
+        events.publishEvent(new TenantEvents.TenantModulesChanged(
+            after.id(), after.slug(), after.name(), after.contactEmail(), after.activeModules()));
+        return TenantDto.of(after);
     }
 
     @PostMapping("/{id}/passcode")
@@ -147,7 +155,9 @@ public class AdminTenantsController {
         AdminGuard.requireAdmin();
         TenantRecord existing = repo.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         repo.setSuspended(id, true);
-        return TenantDto.of(repo.findById(id).orElseThrow());
+        TenantRecord after = repo.findById(id).orElseThrow();
+        events.publishEvent(new TenantEvents.TenantSuspended(after.id(), after.slug()));
+        return TenantDto.of(after);
     }
 
     @PatchMapping("/{id}/resume")
@@ -155,7 +165,10 @@ public class AdminTenantsController {
         AdminGuard.requireAdmin();
         TenantRecord existing = repo.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         repo.setSuspended(id, false);
-        return TenantDto.of(repo.findById(id).orElseThrow());
+        TenantRecord after = repo.findById(id).orElseThrow();
+        events.publishEvent(new TenantEvents.TenantResumed(
+            after.id(), after.slug(), after.name(), after.contactEmail(), after.activeModules()));
+        return TenantDto.of(after);
     }
 
     public record ModuleCatalogEntry(String id, String title, String tagline, String icon, String category) {}

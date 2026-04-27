@@ -1,0 +1,54 @@
+name: release-image
+
+# Build the dental-domain pulsar-backend image and push to GHCR on every
+# push to main. Tagged with both `:dental-<sha>` (immutable) and
+# `:dental-latest` (mutable; the e2e nightly workflow on the
+# pulsar-flow-platform side pulls this tag). Skips the inline
+# git-clone+docker-build that the e2e workflow currently does.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write    # required for ghcr.io push
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          REPO_LOWER=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/$REPO_LOWER" >>"$GITHUB_OUTPUT"
+
+      - name: Build & push (dental)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          build-args: |
+            DOMAIN=dental
+          tags: |
+            ${{ steps.tags.outputs.image }}:dental-${{ github.sha }}
+            ${{ steps.tags.outputs.image }}:dental-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

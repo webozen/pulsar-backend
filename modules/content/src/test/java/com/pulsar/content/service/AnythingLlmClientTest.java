@@ -124,6 +124,35 @@ class AnythingLlmClientTest {
         server.verify();
     }
 
+    /**
+     * Regression: AnythingLLM's GET /api/v1/workspace/{slug} returns HTTP 200
+     * with an EMPTY array body (`{"workspace":[]}`) when the workspace does
+     * not exist — not 404. The previous implementation treated 200 as "exists"
+     * and skipped the create-POST, leaving the chat endpoint to fail with
+     * "Workspace X is not a valid workspace." This test pins the corrected
+     * shape — empty body forces a create.
+     */
+    @Test
+    void getOrCreateWorkspace_emptyBody200_stillPostsCreate() {
+        AnythingLlmClient client = new AnythingLlmClient(BASE, KEY);
+        MockRestServiceServer server = bind(client);
+
+        server.expect(requestTo(BASE + "/api/v1/workspace/acme"))
+            .andExpect(method(HttpMethod.GET))
+            .andRespond(withSuccess("{\"workspace\":[]}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE + "/api/v1/workspace/new"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(header("Authorization", "Bearer " + KEY))
+            .andRespond(withSuccess(
+                "{\"workspace\":{\"slug\":\"acme\"}}",
+                MediaType.APPLICATION_JSON));
+
+        String slug = client.getOrCreateWorkspace("acme");
+
+        assertEquals("acme", slug);
+        server.verify();
+    }
+
     // ---- pushTextDocument ------------------------------------------------
 
     @Test
@@ -131,10 +160,10 @@ class AnythingLlmClientTest {
         AnythingLlmClient client = new AnythingLlmClient(BASE, KEY);
         MockRestServiceServer server = bind(client);
 
-        // getOrCreateWorkspace: GET succeeds.
+        // getOrCreateWorkspace: GET succeeds with a real workspace object.
         server.expect(requestTo(BASE + "/api/v1/workspace/acme"))
             .andExpect(method(HttpMethod.GET))
-            .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+            .andRespond(withSuccess("{\"workspace\":{\"slug\":\"acme\"}}", MediaType.APPLICATION_JSON));
 
         server.expect(requestTo(BASE + "/api/v1/document/raw-text"))
             .andExpect(method(HttpMethod.POST))
@@ -159,7 +188,7 @@ class AnythingLlmClientTest {
 
         server.expect(requestTo(BASE + "/api/v1/workspace/acme"))
             .andExpect(method(HttpMethod.GET))
-            .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+            .andRespond(withSuccess("{\"workspace\":{\"slug\":\"acme\"}}", MediaType.APPLICATION_JSON));
         server.expect(requestTo(BASE + "/api/v1/document/raw-text"))
             .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
 
@@ -176,7 +205,7 @@ class AnythingLlmClientTest {
 
         server.expect(requestTo(BASE + "/api/v1/workspace/acme"))
             .andExpect(method(HttpMethod.GET))
-            .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+            .andRespond(withSuccess("{\"workspace\":{\"slug\":\"acme\"}}", MediaType.APPLICATION_JSON));
 
         server.expect(requestTo(BASE + "/api/v1/document/upload"))
             .andExpect(method(HttpMethod.POST))
@@ -239,7 +268,7 @@ class AnythingLlmClientTest {
 
         server.expect(requestTo(BASE + "/api/v1/workspace/acme"))
             .andExpect(method(HttpMethod.GET))
-            .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+            .andRespond(withSuccess("{\"workspace\":{\"slug\":\"acme\"}}", MediaType.APPLICATION_JSON));
 
         server.expect(requestTo(BASE + "/api/v1/workspace/acme/chat"))
             .andExpect(method(HttpMethod.POST))
@@ -259,7 +288,7 @@ class AnythingLlmClientTest {
 
         server.expect(requestTo(BASE + "/api/v1/workspace/acme"))
             .andExpect(method(HttpMethod.GET))
-            .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+            .andRespond(withSuccess("{\"workspace\":{\"slug\":\"acme\"}}", MediaType.APPLICATION_JSON));
 
         server.expect(requestTo(BASE + "/api/v1/workspace/acme/chat"))
             .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));

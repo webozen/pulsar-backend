@@ -43,7 +43,15 @@ public class AnythingLlmClient {
                 baseUrl + "/api/v1/workspace/" + tenantSlug,
                 HttpMethod.GET, req, Map.class
             );
-            if (resp.getStatusCode().is2xxSuccessful()) return tenantSlug;
+            // AnythingLLM returns 200 with `{"workspace":[]}` (empty array) when
+            // the workspace doesn't exist, and 200 with `{"workspace":{...}}`
+            // (object) when it does. Just checking is2xxSuccessful would skip
+            // creation and break chat with "Workspace X is not a valid workspace".
+            if (resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null) {
+                Object ws = resp.getBody().get("workspace");
+                if (ws instanceof Map<?, ?>) return tenantSlug;
+                if (ws instanceof List<?> list && !list.isEmpty()) return tenantSlug;
+            }
         } catch (Exception ignored) {}
         try {
             HttpEntity<Map<String, String>> req = new HttpEntity<>(

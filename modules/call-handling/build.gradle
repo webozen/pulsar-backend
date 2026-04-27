@@ -1,0 +1,9 @@
+ext { domainTag = 'dental' }
+
+dependencies {
+    implementation project(':kernel')
+    implementation project(':modules:caller-match')
+    implementation project(':modules:call-intel')
+    implementation project(':modules:copilot')
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+}

@@ -1,0 +1,19 @@
+/*
+ * Post-call AI module. Ingests a recording URL (or a pre-existing transcript)
+ * from RingCentral's SessionCompleted webhook, pushes it to Gemini for
+ * transcription + summary + action-item extraction, and stores the result
+ * per-tenant. Reuses OpenDental credentials from opendental-ai for patient
+ * matching. Dental-domain only.
+ */
+ext { domainTag = 'dental' }
+
+dependencies {
+    implementation project(':kernel')
+    implementation project(':modules:opendental-ai')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+}
