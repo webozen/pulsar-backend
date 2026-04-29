@@ -7,6 +7,8 @@ import com.pulsar.kernel.tenant.TenantDataSources;
 import com.pulsar.kernel.tenant.TenantRepository;
 import com.pulsar.translate.TranslateSettings;
 import com.pulsar.translate.TranslateSettingsService;
+import com.pulsar.translate.history.HistoryService;
+import com.pulsar.translate.history.TranscriptCollector;
 import io.jsonwebtoken.Claims;
 import okhttp3.*;
 import okio.ByteString;
@@ -36,6 +38,8 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
     private final TenantDataSources tenantDs;
     private final TenantRepository tenantRepo;
     private final TranslateSettingsService settingsService;
+    private final HistoryService historyService;
+    private final ConcurrentHashMap<String, TranscriptCollector> collectors = new ConcurrentHashMap<>();
     private final ObjectMapper mapper = new ObjectMapper();
     private final OkHttpClient okClient = new OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS) // no timeout — streaming session
@@ -63,11 +67,13 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
     private static final int MAX_CONTROL_FRAME_BYTES = 4 * 1024;
 
     public GeminiProxyHandler(JwtService jwtService, TenantDataSources tenantDs,
-                              TenantRepository tenantRepo, TranslateSettingsService settingsService) {
+                              TenantRepository tenantRepo, TranslateSettingsService settingsService,
+                              HistoryService historyService) {
         this.jwtService = jwtService;
         this.tenantDs = tenantDs;
         this.tenantRepo = tenantRepo;
         this.settingsService = settingsService;
+        this.historyService = historyService;
     }
 
     @Override
@@ -247,6 +253,7 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
         TranslateSettings settings = settingsService.forDb(tenant.dbName());
         startSessionTimer(session, settings);
         session.getAttributes().put("translate_settings", settings);
+        collectors.put(session.getId(), historyService.start(tenant.dbName(), sourceLang, targetLang, mode));
 
         String systemInstruction = SystemInstructions.build(mode, sourceLang, targetLang);
         openGeminiConnection(session, geminiKey, systemInstruction);
@@ -402,14 +409,17 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
             Map<String, Object> sc = (Map<String, Object>) msg.get("serverContent");
             if (sc == null) return;
 
+            TranscriptCollector collector = collectors.get(session.getId());
+
             Map<String, Object> mt = (Map<String, Object>) sc.get("modelTurn");
             if (mt != null) {
                 var parts = (List<Map<String, Object>>) mt.get("parts");
                 if (parts != null) for (var p : parts) {
                     String text = (String) p.get("text");
                     if (text != null && !Boolean.TRUE.equals(p.get("thought"))) {
-                        safeSend(session, Map.of("type", "translation", "text", text,
-                            "final", Boolean.TRUE.equals(sc.get("turnComplete"))));
+                        boolean isFinal = Boolean.TRUE.equals(sc.get("turnComplete"));
+                        safeSend(session, Map.of("type", "translation", "text", text, "final", isFinal));
+                        if (isFinal && collector != null) collector.recordOutput(text);
                     }
                     Map<String, Object> id = (Map<String, Object>) p.get("inlineData");
                     if (id != null) safeSend(session, Map.of("type", "audio", "data", id.get("data"), "mimeType", id.get("mimeType")));
@@ -417,12 +427,20 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
             }
 
             Map<String, Object> it = (Map<String, Object>) sc.get("inputTranscription");
-            if (it != null && it.get("text") != null)
-                safeSend(session, Map.of("type", "input-transcription", "text", it.get("text")));
+            if (it != null && it.get("text") != null) {
+                String t = (String) it.get("text");
+                safeSend(session, Map.of("type", "input-transcription", "text", t));
+                if (collector != null) collector.recordInput(t);
+            }
 
             Map<String, Object> ot = (Map<String, Object>) sc.get("outputTranscription");
-            if (ot != null && ot.get("text") != null)
-                safeSend(session, Map.of("type", "output-transcription", "text", ot.get("text")));
+            if (ot != null && ot.get("text") != null) {
+                String t = (String) ot.get("text");
+                safeSend(session, Map.of("type", "output-transcription", "text", t));
+                // For voice modes, the audio output transcription is the canonical output;
+                // record it here so we don't miss output when modelTurn.text is absent.
+                if (collector != null) collector.recordOutput(t);
+            }
 
             if (Boolean.TRUE.equals(sc.get("turnComplete")))
                 safeSend(session, Map.of("type", "turn-complete"));
@@ -463,6 +481,11 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
         geminiReady.remove(id);
         pendingFrames.remove(id);
         SessionTimer timer = sessionTimers.remove(id);
+        TranscriptCollector collector = collectors.remove(id);
+        if (collector != null) {
+            int extendsUsed = timer != null ? timer.extendsUsed() : 0;
+            historyService.finalize(collector, extendsUsed);
+        }
         if (timer != null) timer.cancel();
         okhttp3.WebSocket g = geminiSockets.remove(id);
         if (g != null) { try { g.close(1000, "done"); } catch (Exception ignored) {} }
