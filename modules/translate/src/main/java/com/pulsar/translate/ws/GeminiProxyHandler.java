@@ -43,6 +43,20 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
     private final ConcurrentHashMap<String, okhttp3.WebSocket> geminiSockets = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Boolean> authPending = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ScheduledFuture<?>> authTimeouts = new ConcurrentHashMap<>();
+    // True once Gemini's setupComplete has arrived for this session.
+    private final ConcurrentHashMap<String, Boolean> geminiReady = new ConcurrentHashMap<>();
+    // Frames that arrived between auth-success and setupComplete. Flushed once Gemini is ready.
+    private final ConcurrentHashMap<String, Deque<String>> pendingFrames = new ConcurrentHashMap<>();
+    private static final int MAX_PENDING_FRAMES = 50;
+
+    private static final long GEMINI_SEND_DEADLINE_MS = 5_000;
+
+    // Per-type inbound frame caps. Audio frames are base64-encoded PCM @ 16kHz / 4096 samples
+    // (~11 KB per chunk), so 400 KB is a generous cap that absorbs back-pressure spikes
+    // without letting a malicious client spam memory through the 2 MB WS buffer.
+    private static final int MAX_AUDIO_FRAME_BYTES = 400 * 1024;
+    private static final int MAX_TEXT_FRAME_BYTES = 8 * 1024;
+    private static final int MAX_CONTROL_FRAME_BYTES = 4 * 1024;
 
     public GeminiProxyHandler(JwtService jwtService, TenantDataSources tenantDs, TenantRepository tenantRepo) {
         this.jwtService = jwtService;
@@ -94,8 +108,29 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
 
     private void handleTextMessageInternal(WebSocketSession session, TextMessage message) throws Exception {
         String payload = message.getPayload();
+        int payloadBytes = payload.length();
+        // Hard ceiling — anything above the largest per-type cap is rejected before we parse.
+        if (payloadBytes > MAX_AUDIO_FRAME_BYTES) {
+            log.warn("Frame too large: session={} bytes={} cap={}", session.getId(), payloadBytes, MAX_AUDIO_FRAME_BYTES);
+            safeSend(session, Map.of("type", "error", "message", "Frame too large"));
+            closeSession(session, new CloseStatus(1009, "MESSAGE_TOO_BIG"));
+            return;
+        }
         log.info("Browser msg: session={} type={}", session.getId(), payload.length() > 50 ? payload.substring(0, 50) : payload);
         Map<String, Object> msg = mapper.readValue(payload, new TypeReference<>() {});
+        String type = (String) msg.get("type");
+        // Per-type caps — reject before doing any processing.
+        int typeCap = switch (type == null ? "" : type) {
+            case "audio" -> MAX_AUDIO_FRAME_BYTES;
+            case "text" -> MAX_TEXT_FRAME_BYTES;
+            default -> MAX_CONTROL_FRAME_BYTES;
+        };
+        if (payloadBytes > typeCap) {
+            log.warn("Frame exceeds per-type cap: session={} type={} bytes={} cap={}", session.getId(), type, payloadBytes, typeCap);
+            safeSend(session, Map.of("type", "error", "message", "Frame exceeds " + type + " cap"));
+            closeSession(session, new CloseStatus(1009, "MESSAGE_TOO_BIG"));
+            return;
+        }
 
         if (authPending.containsKey(session.getId())) {
             handleAuth(session, msg);
@@ -104,26 +139,26 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
 
         okhttp3.WebSocket geminiWs = geminiSockets.get(session.getId());
         if (geminiWs == null) {
-            log.warn("No Gemini socket for session={} type={}", session.getId(), msg.get("type"));
+            log.warn("No Gemini socket for session={} type={}", session.getId(), type);
             return;
         }
 
-        String type = (String) msg.get("type");
         if ("audio".equals(type)) {
             String data = (String) msg.get("data");
             if (data == null || data.isEmpty()) return;
-            boolean sent = geminiWs.send(mapper.writeValueAsString(Map.of(
+            String json = mapper.writeValueAsString(Map.of(
                 "realtimeInput", Map.of("audio", Map.of("data", data, "mimeType", "audio/pcm;rate=16000"))
-            )));
-            if (!sent) log.warn("Audio send failed (Gemini WS closed?): session={}", session.getId());
+            ));
+            queueOrSend(session, geminiWs, json, "audio");
         } else if ("text".equals(type)) {
             String text = (String) msg.get("text");
             if (text == null || text.isBlank()) return;
-            geminiWs.send(mapper.writeValueAsString(Map.of(
+            String json = mapper.writeValueAsString(Map.of(
                 "clientContent", Map.of(
                     "turns", List.of(Map.of("role", "user", "parts", List.of(Map.of("text", text)))),
                     "turnComplete", true)
-            )));
+            ));
+            queueOrSend(session, geminiWs, json, "text");
         } else if ("end".equals(type)) {
             closeSession(session, CloseStatus.NORMAL);
         }
@@ -227,6 +262,8 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
                     applyCallbackMdc();
                     log.info("Gemini WS opened: session={} model={}", browserSession.getId(), GEMINI_MODEL);
                     geminiSockets.put(browserSession.getId(), ws);
+                    geminiReady.put(browserSession.getId(), false);
+                    pendingFrames.put(browserSession.getId(), new ConcurrentLinkedDeque<>());
                     try {
                         // Build setup message
                         Map<String, Object> genConfig = new LinkedHashMap<>();
@@ -243,7 +280,7 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
 
                         String setupJson = mapper.writeValueAsString(Map.of("setup", setupInner));
                         log.info("Sending setup to Gemini: {}", setupJson);
-                        ws.send(setupJson);
+                        sendWithWatchdog(browserSession, ws, setupJson, "setup");
                     } catch (Exception e) {
                         log.error("Gemini setup failed: {}", e.getMessage());
                         safeSend(browserSession, Map.of("type", "error", "message", "Gemini setup failed: " + e.getMessage()));
@@ -326,6 +363,8 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
 
             if (msg.containsKey("setupComplete") || msg.containsKey("setup_complete")) {
                 log.info("Gemini setupComplete for session={}", session.getId());
+                geminiReady.put(session.getId(), true);
+                flushPendingFrames(session);
                 safeSend(session, Map.of("type", "ready"));
                 return;
             }
@@ -391,6 +430,8 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
         authPending.remove(id);
         ScheduledFuture<?> t = authTimeouts.remove(id);
         if (t != null) t.cancel(false);
+        geminiReady.remove(id);
+        pendingFrames.remove(id);
         okhttp3.WebSocket g = geminiSockets.remove(id);
         if (g != null) { try { g.close(1000, "done"); } catch (Exception ignored) {} }
     }
@@ -406,5 +447,63 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
     private void closeSession(WebSocketSession session, CloseStatus status) {
         cleanup(session.getId());
         try { if (session.isOpen()) session.close(status); } catch (Exception ignored) {}
+    }
+
+    /**
+     * Queue a frame if Gemini hasn't finished setup yet, otherwise send it through the watchdog.
+     * Without this, frames sent in the ~200–500 ms window between auth-success and setupComplete
+     * are silently dropped — the user's first words vanish. Pending frames are capped at
+     * MAX_PENDING_FRAMES to prevent unbounded memory growth if setup never completes.
+     */
+    private void queueOrSend(WebSocketSession session, okhttp3.WebSocket geminiWs, String json, String label) {
+        if (Boolean.TRUE.equals(geminiReady.get(session.getId()))) {
+            sendWithWatchdog(session, geminiWs, json, label);
+            return;
+        }
+        Deque<String> q = pendingFrames.get(session.getId());
+        if (q == null) {
+            // Race: cleanup happened between map lookup and our get. Drop silently.
+            return;
+        }
+        if (q.size() >= MAX_PENDING_FRAMES) {
+            q.pollFirst();
+        }
+        q.offerLast(json);
+    }
+
+    private void flushPendingFrames(WebSocketSession session) {
+        Deque<String> q = pendingFrames.remove(session.getId());
+        if (q == null || q.isEmpty()) return;
+        okhttp3.WebSocket ws = geminiSockets.get(session.getId());
+        if (ws == null) return;
+        log.info("Flushing {} pending frames for session={}", q.size(), session.getId());
+        String frame;
+        while ((frame = q.pollFirst()) != null) {
+            sendWithWatchdog(session, ws, frame, "buffered");
+        }
+    }
+
+    /**
+     * Send to Gemini with a watchdog. OkHttp's send() returns false when the outbound
+     * queue is full or the socket is closing — but a half-open peer can leave a frame
+     * "accepted" yet never delivered. This wraps the send so that a stuck call is
+     * detected within GEMINI_SEND_DEADLINE_MS and the browser session is torn down
+     * with a clear error rather than wedging silently.
+     */
+    private boolean sendWithWatchdog(WebSocketSession browserSession, okhttp3.WebSocket geminiWs, String payload, String label) {
+        ScheduledFuture<?> deadline = scheduler.schedule(() -> {
+            log.error("Gemini send watchdog tripped: session={} label={}", browserSession.getId(), label);
+            safeSend(browserSession, Map.of("type", "error", "message", "Gemini send timed out (" + label + ")"));
+            closeSession(browserSession, CloseStatus.SERVER_ERROR);
+        }, GEMINI_SEND_DEADLINE_MS, TimeUnit.MILLISECONDS);
+        try {
+            boolean accepted = geminiWs.send(payload);
+            if (!accepted) {
+                log.warn("Gemini send rejected (queue full or socket closing): session={} label={}", browserSession.getId(), label);
+            }
+            return accepted;
+        } finally {
+            deadline.cancel(false);
+        }
     }
 }
