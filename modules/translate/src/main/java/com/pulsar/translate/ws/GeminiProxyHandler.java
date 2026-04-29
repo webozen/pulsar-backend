@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pulsar.kernel.auth.JwtService;
 import com.pulsar.kernel.tenant.TenantDataSources;
 import com.pulsar.kernel.tenant.TenantRepository;
+import com.pulsar.translate.TranslateSettings;
+import com.pulsar.translate.TranslateSettingsService;
 import io.jsonwebtoken.Claims;
 import okhttp3.*;
 import okio.ByteString;
@@ -33,6 +35,7 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
     private final JwtService jwtService;
     private final TenantDataSources tenantDs;
     private final TenantRepository tenantRepo;
+    private final TranslateSettingsService settingsService;
     private final ObjectMapper mapper = new ObjectMapper();
     private final OkHttpClient okClient = new OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS) // no timeout — streaming session
@@ -48,6 +51,7 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
     // Frames that arrived between auth-success and setupComplete. Flushed once Gemini is ready.
     private final ConcurrentHashMap<String, Deque<String>> pendingFrames = new ConcurrentHashMap<>();
     private static final int MAX_PENDING_FRAMES = 50;
+    private final ConcurrentHashMap<String, SessionTimer> sessionTimers = new ConcurrentHashMap<>();
 
     private static final long GEMINI_SEND_DEADLINE_MS = 5_000;
 
@@ -58,10 +62,12 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
     private static final int MAX_TEXT_FRAME_BYTES = 8 * 1024;
     private static final int MAX_CONTROL_FRAME_BYTES = 4 * 1024;
 
-    public GeminiProxyHandler(JwtService jwtService, TenantDataSources tenantDs, TenantRepository tenantRepo) {
+    public GeminiProxyHandler(JwtService jwtService, TenantDataSources tenantDs,
+                              TenantRepository tenantRepo, TranslateSettingsService settingsService) {
         this.jwtService = jwtService;
         this.tenantDs = tenantDs;
         this.tenantRepo = tenantRepo;
+        this.settingsService = settingsService;
     }
 
     @Override
@@ -137,6 +143,12 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
             return;
         }
 
+        if ("extend-session".equals(type)) {
+            SessionTimer timer = sessionTimers.get(session.getId());
+            if (timer != null) timer.extend();
+            return;
+        }
+
         okhttp3.WebSocket geminiWs = geminiSockets.get(session.getId());
         if (geminiWs == null) {
             log.warn("No Gemini socket for session={} type={}", session.getId(), type);
@@ -205,6 +217,7 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
             return;
         }
         var tenant = tenantOpt.get();
+        session.getAttributes().put("tenant_db", tenant.dbName());
 
         if (!tenant.activeModules().contains("translate")) {
             safeSend(session, Map.of("type", "error", "message", "module_not_active"));
@@ -231,9 +244,26 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
             return;
         }
 
+        TranslateSettings settings = settingsService.forDb(tenant.dbName());
+        startSessionTimer(session, settings);
+        session.getAttributes().put("translate_settings", settings);
+
         String systemInstruction = SystemInstructions.build(mode, sourceLang, targetLang);
         openGeminiConnection(session, geminiKey, systemInstruction);
-        log.info("Translate session: tenant={} mode={} src={} tgt={} model={}", slug, mode, sourceLang, targetLang, GEMINI_MODEL);
+        log.info("Translate session: tenant={} mode={} src={} tgt={} model={} duration={}min", slug, mode, sourceLang, targetLang, GEMINI_MODEL, settings.sessionDurationMin());
+    }
+
+    private void startSessionTimer(WebSocketSession session, TranslateSettings settings) {
+        SessionTimer timer = new SessionTimer(
+            session.getId(),
+            settings.sessionDurationMin(),
+            settings.extendGrantMin(),
+            settings.maxExtends(),
+            scheduler,
+            (sid, frame) -> safeSend(session, frame),
+            (sid) -> closeSession(session, CloseStatus.NORMAL)
+        );
+        sessionTimers.put(session.getId(), timer);
     }
 
     private void openGeminiConnection(WebSocketSession browserSession, String geminiKey, String systemInstruction) {
@@ -432,6 +462,8 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
         if (t != null) t.cancel(false);
         geminiReady.remove(id);
         pendingFrames.remove(id);
+        SessionTimer timer = sessionTimers.remove(id);
+        if (timer != null) timer.cancel();
         okhttp3.WebSocket g = geminiSockets.remove(id);
         if (g != null) { try { g.close(1000, "done"); } catch (Exception ignored) {} }
     }
