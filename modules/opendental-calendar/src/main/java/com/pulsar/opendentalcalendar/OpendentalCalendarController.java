@@ -95,7 +95,7 @@ public class OpendentalCalendarController {
             "SELECT a.AptNum, a.PatNum, a.AptDateTime, " +
             "       DATE_ADD(a.AptDateTime, INTERVAL LENGTH(a.Pattern)*5 MINUTE) AS AptTimeEnd, " +
             "       a.Op, a.ProcDescript, a.AptStatus, a.IsNewPatient, " +
-            "       p.FName, p.LName, p.HmPhone, p.WirelessPhone, " +
+            "       p.FName, p.LName, p.HmPhone, p.WirelessPhone, p.Birthdate, " +
             "       o.OpName, o.Abbrev AS OpAbbrev, " +
             "       prov.Abbr AS ProvAbbr " +
             "FROM appointment a " +
