@@ -91,11 +91,12 @@ public class OpendentalCalendarController {
         // logically valid date) — no SQL metacharacter can appear in this pattern.
         var keys = loadKeys();
         String sql =
-            "SELECT a.AptNum, a.PatNum, a.AptDateTime, a.AptTimeEnd, a.Op, " +
-            "       a.ProcDescript, a.AptStatus, a.IsNewPatient, " +
+            "SELECT a.AptNum, a.PatNum, a.AptDateTime, " +
+            "       DATE_ADD(a.AptDateTime, INTERVAL LENGTH(a.Pattern)*5 MINUTE) AS AptTimeEnd, " +
+            "       a.Op, a.ProcDescript, a.AptStatus, a.IsNewPatient, " +
             "       p.FName, p.LName, p.HmPhone, p.WirelessPhone, " +
             "       o.OpName, o.Abbrev AS OpAbbrev, " +
-            "       prov.Abbrev AS ProvAbbr " +
+            "       prov.Abbr AS ProvAbbr " +
             "FROM appointment a " +
             "JOIN patient p ON a.PatNum = p.PatNum " +
             "JOIN operatory o ON a.Op = o.OperatoryNum " +
