@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
@@ -104,6 +105,78 @@ public class OpendentalCalendarController {
             "WHERE DATE(a.AptDateTime) = '" + date + "' " +
             "  AND a.AptStatus = 1 " +
             "ORDER BY a.AptDateTime";
+        try {
+            return client.query(keys.devKey(), keys.custKey(), sql);
+        } catch (IOException | OdCalendarQueryClient.OdException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+    }
+
+    @GetMapping("/patients/{patNum}/treatment-plan")
+    public List<Map<String, Object>> treatmentPlan(@PathVariable long patNum) {
+        var keys = loadKeys();
+        String sql =
+            "SELECT pl.ProcNum, pl.ProcDate, pl.ProcFee, pl.ProcStatus, " +
+            "       pl.ToothNum, pl.UnitQty, pc.ProcCode, pc.Descript " +
+            "FROM procedurelog pl " +
+            "JOIN procedurecode pc ON pl.CodeNum = pc.CodeNum " +
+            "WHERE pl.PatNum = " + patNum + " AND pl.ProcStatus = 1 " +
+            "ORDER BY pl.ProcDate DESC";
+        try {
+            return client.query(keys.devKey(), keys.custKey(), sql);
+        } catch (IOException | OdCalendarQueryClient.OdException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+    }
+
+    @GetMapping("/patients/{patNum}/ledger")
+    public List<Map<String, Object>> ledger(@PathVariable long patNum) {
+        var keys = loadKeys();
+        String sql =
+            "SELECT p.PayNum, p.PayDate, p.PayAmt, p.PayNote, " +
+            "       COALESCE(d.ItemName, 'Other') AS PayTypeName " +
+            "FROM payment p " +
+            "LEFT JOIN definition d ON p.PayType = d.DefNum " +
+            "WHERE p.PatNum = " + patNum + " " +
+            "ORDER BY p.PayDate DESC " +
+            "LIMIT 100";
+        try {
+            return client.query(keys.devKey(), keys.custKey(), sql);
+        } catch (IOException | OdCalendarQueryClient.OdException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+    }
+
+    @GetMapping("/patients/{patNum}/commlogs")
+    public List<Map<String, Object>> commLogs(@PathVariable long patNum) {
+        var keys = loadKeys();
+        String sql =
+            "SELECT CommlogNum, CommDateTime, Note, Mode_, SentOrReceived " +
+            "FROM commlog " +
+            "WHERE PatNum = " + patNum + " " +
+            "ORDER BY CommDateTime DESC " +
+            "LIMIT 100";
+        try {
+            return client.query(keys.devKey(), keys.custKey(), sql);
+        } catch (IOException | OdCalendarQueryClient.OdException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+    }
+
+    @GetMapping("/patients/{patNum}/apt-history")
+    public List<Map<String, Object>> aptHistory(@PathVariable long patNum) {
+        var keys = loadKeys();
+        String sql =
+            "SELECT a.AptNum, a.AptDateTime, " +
+            "       DATE_ADD(a.AptDateTime, INTERVAL LENGTH(a.Pattern)*5 MINUTE) AS AptTimeEnd, " +
+            "       a.AptStatus, a.ProcDescript, " +
+            "       prov.Abbr AS ProvAbbr, o.OpName " +
+            "FROM appointment a " +
+            "JOIN provider prov ON a.ProvNum = prov.ProvNum " +
+            "JOIN operatory o ON a.Op = o.OperatoryNum " +
+            "WHERE a.PatNum = " + patNum + " " +
+            "ORDER BY a.AptDateTime DESC " +
+            "LIMIT 100";
         try {
             return client.query(keys.devKey(), keys.custKey(), sql);
         } catch (IOException | OdCalendarQueryClient.OdException e) {
