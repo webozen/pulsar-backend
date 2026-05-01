@@ -40,8 +40,15 @@ public class OpendentalCalendarController {
     public Map<String, Object> configStatus() {
         var t = TenantContext.require();
         JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(t.dbName()));
-        var rows = jdbc.queryForList("SELECT 1 FROM opendental_calendar_config WHERE id = 1");
-        return Map.of("onboarded", !rows.isEmpty());
+        for (String query : new String[]{
+            "SELECT 1 FROM opendental_calendar_config WHERE id = 1",
+            "SELECT 1 FROM opendental_ai_config WHERE id = 1",
+        }) {
+            try {
+                if (!jdbc.queryForList(query).isEmpty()) return Map.of("onboarded", true);
+            } catch (Exception ignored) {}
+        }
+        return Map.of("onboarded", false);
     }
 
     @PostMapping("/config")
