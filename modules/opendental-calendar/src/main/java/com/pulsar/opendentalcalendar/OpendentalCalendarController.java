@@ -184,6 +184,26 @@ public class OpendentalCalendarController {
         }
     }
 
+    @GetMapping("/patients/{patNum}/claims")
+    public List<Map<String, Object>> claims(@PathVariable long patNum) {
+        var keys = loadKeys();
+        String sql =
+            "SELECT c.ClaimNum, c.DateService, c.DateSent, c.ClaimStatus, c.ClaimType, " +
+            "       c.ClaimFee, c.InsPayEst, c.InsPayAmt, c.DedApplied, c.WriteOff, " +
+            "       c.PreAuthString, c.ReasonUnderPaid, carr.CarrierName " +
+            "FROM claim c " +
+            "JOIN insplan ip ON c.PlanNum = ip.PlanNum " +
+            "JOIN carrier carr ON ip.CarrierNum = carr.CarrierNum " +
+            "WHERE c.PatNum = " + patNum + " " +
+            "ORDER BY c.DateService DESC " +
+            "LIMIT 100";
+        try {
+            return client.query(keys.devKey(), keys.custKey(), sql);
+        } catch (IOException | OdCalendarQueryClient.OdException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+    }
+
     private record Keys(String devKey, String custKey) {}
 
     private Keys loadKeys() {
