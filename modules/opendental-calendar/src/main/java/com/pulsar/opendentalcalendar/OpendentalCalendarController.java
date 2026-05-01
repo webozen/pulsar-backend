@@ -3,6 +3,7 @@ package com.pulsar.opendentalcalendar;
 import com.pulsar.kernel.security.RequireModule;
 import com.pulsar.kernel.tenant.TenantContext;
 import com.pulsar.kernel.tenant.TenantDataSources;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.io.IOException;
 import java.util.List;
@@ -44,7 +45,7 @@ public class OpendentalCalendarController {
     }
 
     @PostMapping("/config")
-    public Map<String, Object> saveConfig(@RequestBody ConfigRequest req) {
+    public Map<String, Object> saveConfig(@Valid @RequestBody ConfigRequest req) {
         var t = TenantContext.require();
         JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(t.dbName()));
         jdbc.update(
@@ -74,6 +75,13 @@ public class OpendentalCalendarController {
         if (!date.matches("\\d{4}-\\d{2}-\\d{2}")) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "date must be YYYY-MM-DD");
         }
+        try {
+            java.time.LocalDate.parse(date);
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid date: " + date);
+        }
+        // Safe to concatenate: value is validated to YYYY-MM-DD above (only digits + hyphens,
+        // logically valid date) — no SQL metacharacter can appear in this pattern.
         var keys = loadKeys();
         String sql =
             "SELECT a.AptNum, a.PatNum, a.AptDateTime, a.AptTimeEnd, a.Op, " +
