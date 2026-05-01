@@ -108,12 +108,22 @@ public class OpendentalCalendarController {
     private Keys loadKeys() {
         var t = TenantContext.require();
         JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(t.dbName()));
-        var rows = jdbc.queryForList(
-            "SELECT od_developer_key, od_customer_key FROM opendental_calendar_config WHERE id = 1");
-        if (rows.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "Module not configured");
+        // Own config takes priority; fall back to opendental_ai_config so tenants
+        // that already set up OpenDental AI don't have to enter the same keys again.
+        for (String query : new String[]{
+            "SELECT od_developer_key, od_customer_key FROM opendental_calendar_config WHERE id = 1",
+            "SELECT od_developer_key, od_customer_key FROM opendental_ai_config WHERE id = 1",
+        }) {
+            try {
+                var rows = jdbc.queryForList(query);
+                if (!rows.isEmpty()) {
+                    var row = rows.get(0);
+                    return new Keys((String) row.get("od_developer_key"), (String) row.get("od_customer_key"));
+                }
+            } catch (Exception ignored) {
+                // table may not exist if the other module was never activated
+            }
         }
-        var row = rows.get(0);
-        return new Keys((String) row.get("od_developer_key"), (String) row.get("od_customer_key"));
+        throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "Module not configured");
     }
 }
