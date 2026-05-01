@@ -59,6 +59,21 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
 
     private static final long GEMINI_SEND_DEADLINE_MS = 5_000;
 
+    // Maps the language NAME emitted by Gemini in its `[Punjabi]` / `[Hindi+English]`
+    // bracket marker (per the auto-detect clause in SystemInstructions) back to the
+    // ISO 639-1 code our transliterator keys on. Only includes languages we can
+    // actually transliterate — others fall through and the transcript stays as-is.
+    private static final java.util.regex.Pattern LANG_MARKER =
+        java.util.regex.Pattern.compile("^\\s*\\[([A-Za-z+ ]+)\\]");
+    private static final Map<String, String> LANG_NAME_TO_CODE = Map.ofEntries(
+        Map.entry("punjabi", "pa"), Map.entry("hindi", "hi"), Map.entry("marathi", "mr"),
+        Map.entry("nepali", "ne"), Map.entry("sanskrit", "sa"), Map.entry("tamil", "ta"),
+        Map.entry("telugu", "te"), Map.entry("kannada", "kn"), Map.entry("malayalam", "ml"),
+        Map.entry("bengali", "bn"), Map.entry("gujarati", "gu"), Map.entry("arabic", "ar"),
+        Map.entry("urdu", "ur"), Map.entry("russian", "ru"), Map.entry("ukrainian", "uk"),
+        Map.entry("bulgarian", "bg")
+    );
+
     // Per-type inbound frame caps. Audio frames are base64-encoded PCM @ 16kHz / 4096 samples
     // (~11 KB per chunk), so 400 KB is a generous cap that absorbs back-pressure spikes
     // without letting a malicious client spam memory through the 2 MB WS buffer.
@@ -253,6 +268,19 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
         TranslateSettings settings = settingsService.forDb(tenant.dbName());
         startSessionTimer(session, settings);
         session.getAttributes().put("translate_settings", settings);
+        // Stored so handleGeminiMessage can transliterate input transcripts
+        // back to native script when Gemini's STT romanizes Indic/CJK speech.
+        session.getAttributes().put("source_lang", sourceLang);
+        // Conversation-bootstrap gate: when the user has picked no language at
+        // all (auto sourceLang AND no explicit patient targetLang), Gemini's
+        // built-in `PATIENT LANGUAGE BOOTSTRAP` clause is unreliable — it
+        // sometimes still translates staff's English into Hindi/Spanish/etc.
+        // based on a guess. We suppress translation/audio/output-transcription
+        // frames until the patient has actually spoken (detected via a
+        // non-ASCII inputTranscription). Picker is the FE-side switch: any
+        // explicit choice ('pa', 'hi', etc.) drops the gate immediately.
+        boolean autoMode = "auto".equals(sourceLang) && "conversation".equals(mode) && "en".equals(targetLang);
+        session.getAttributes().put("auto_mode", autoMode);
         collectors.put(session.getId(), historyService.start(tenant.dbName(), sourceLang, targetLang, mode));
 
         String systemInstruction = SystemInstructions.build(mode, sourceLang, targetLang);
@@ -308,9 +336,25 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
                         genConfig.put("speech_config", Map.of("voice_config", Map.of(
                             "prebuilt_voice_config", Map.of("voice_name", "Kore"))));
 
+                        // Tighter end-of-speech detection — without this, a 30+ second
+                        // monologue collapses into a single huge turn (and one giant
+                        // bubble in the kiosk). HIGH sensitivity + 600ms silence cuts
+                        // turns at natural sentence breaks, so each utterance gets its
+                        // own input/translation pair on the FE.
+                        Map<String, Object> realtimeInputConfig = Map.of(
+                            "automatic_activity_detection", Map.of(
+                                "end_of_speech_sensitivity", "END_SENSITIVITY_HIGH",
+                                "silence_duration_ms", 600
+                            )
+                        );
+
                         Map<String, Object> setupInner = new LinkedHashMap<>();
                         setupInner.put("model", "models/" + GEMINI_MODEL);
                         setupInner.put("generation_config", genConfig);
+                        setupInner.put("realtime_input_config", realtimeInputConfig);
+                        // Sliding-window compression: trims old turns when the context
+                        // approaches the model limit. Insurance for the 30-min session.
+                        setupInner.put("context_window_compression", Map.of("sliding_window", new LinkedHashMap<>()));
                         setupInner.put("input_audio_transcription", new LinkedHashMap<>());
                         setupInner.put("output_audio_transcription", new LinkedHashMap<>());
                         setupInner.put("system_instruction", Map.of("parts", List.of(Map.of("text", systemInstruction))));
@@ -411,12 +455,31 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
 
             TranscriptCollector collector = collectors.get(session.getId());
 
+            // Bootstrap-gate: in pure auto mode, suppress translation/audio/output
+            // frames until the patient has actually spoken (detected via a non-ASCII
+            // inputTranscription). The corresponding system_instruction clause asks
+            // Gemini to do this, but it's unreliable; we enforce it server-side.
+            boolean autoMode = Boolean.TRUE.equals(session.getAttributes().get("auto_mode"));
+            boolean patientSpoke = Boolean.TRUE.equals(session.getAttributes().get("patient_spoke"));
+
+            Map<String, Object> it = (Map<String, Object>) sc.get("inputTranscription");
+            if (autoMode && !patientSpoke && it != null && it.get("text") != null) {
+                String t = (String) it.get("text");
+                if (containsNonAsciiLetter(t)) {
+                    session.getAttributes().put("patient_spoke", true);
+                    patientSpoke = true;
+                    log.info("Bootstrap gate opened: session={} firstNonAscii={}", session.getId(), t.length() > 30 ? t.substring(0, 30) + "..." : t);
+                }
+            }
+            boolean gateOpen = !autoMode || patientSpoke;
+
             Map<String, Object> mt = (Map<String, Object>) sc.get("modelTurn");
-            if (mt != null) {
+            if (mt != null && gateOpen) {
                 var parts = (List<Map<String, Object>>) mt.get("parts");
                 if (parts != null) for (var p : parts) {
                     String text = (String) p.get("text");
                     if (text != null && !Boolean.TRUE.equals(p.get("thought"))) {
+                        maybeEmitLanguageHint(session, text);
                         boolean isFinal = Boolean.TRUE.equals(sc.get("turnComplete"));
                         safeSend(session, Map.of("type", "translation", "text", text, "final", isFinal));
                         if (isFinal && collector != null) collector.recordOutput(text);
@@ -426,15 +489,23 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
                 }
             }
 
-            Map<String, Object> it = (Map<String, Object>) sc.get("inputTranscription");
             if (it != null && it.get("text") != null) {
                 String t = (String) it.get("text");
+                // Picker is the source of truth for script. We only transliterate
+                // when the user has explicitly chosen a source language; auto-detect
+                // mode passes through unchanged because Gemini's first-turn language
+                // ID is unreliable for closely-related pairs (Punjabi↔Hindi etc.)
+                // and a wrong ICU pass corrupts the transcript.
+                String srcLang = (String) session.getAttributes().get("source_lang");
+                if (srcLang != null && !"auto".equals(srcLang)) {
+                    t = TranscriptTransliterator.maybeTransliterate(t, srcLang);
+                }
                 safeSend(session, Map.of("type", "input-transcription", "text", t));
                 if (collector != null) collector.recordInput(t);
             }
 
             Map<String, Object> ot = (Map<String, Object>) sc.get("outputTranscription");
-            if (ot != null && ot.get("text") != null) {
+            if (ot != null && ot.get("text") != null && gateOpen) {
                 String t = (String) ot.get("text");
                 safeSend(session, Map.of("type", "output-transcription", "text", t));
                 // For voice modes, the audio output transcription is the canonical output;
@@ -442,7 +513,7 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
                 if (collector != null) collector.recordOutput(t);
             }
 
-            if (Boolean.TRUE.equals(sc.get("turnComplete")))
+            if (Boolean.TRUE.equals(sc.get("turnComplete")) && gateOpen)
                 safeSend(session, Map.of("type", "turn-complete"));
 
         } catch (Exception e) {
@@ -472,6 +543,49 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
             MDC.put("tenant_id", slug.toString());
         }
         MDC.put("session_id", session.getId());
+    }
+
+    /**
+     * In auto-detect mode the system_instruction asks Gemini to prefix its
+     * first translation with a `[Punjabi]` or `[Punjabi+English]` marker.
+     * We forward that as a one-shot hint so the FE can offer the staff a
+     * "Switch script to Punjabi?" prompt — but we deliberately do NOT use
+     * it to drive transliteration ourselves, because Gemini frequently
+     * misclassifies closely-related languages (Punjabi↔Hindi, Marathi↔Hindi,
+     * Urdu↔Hindi). The picker remains the source of truth for script.
+     */
+    private void maybeEmitLanguageHint(WebSocketSession session, String text) {
+        if (Boolean.TRUE.equals(session.getAttributes().get("lang_hint_sent"))) return;
+        String src = (String) session.getAttributes().get("source_lang");
+        if (src != null && !"auto".equals(src)) return;
+        var m = LANG_MARKER.matcher(text);
+        if (!m.find()) return;
+        String name = m.group(1).toLowerCase();
+        if (name.contains("+")) name = name.split("\\+")[0].trim();
+        String code = LANG_NAME_TO_CODE.get(name);
+        if (code == null) return;
+        session.getAttributes().put("lang_hint_sent", true);
+        safeSend(session, Map.of("type", "language-hint", "lang", code, "name", capitalize(name)));
+        log.info("Emitted language hint: session={} lang={}", session.getId(), code);
+    }
+
+    private static String capitalize(String s) {
+        return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
+
+    /**
+     * Returns true if the text contains any non-ASCII letter character.
+     * Used to detect that the patient — speaking a non-English language —
+     * has been transcribed by Gemini in their native script. Whitespace and
+     * punctuation outside ASCII don't count (some Indic punctuation can
+     * appear even in romanized output).
+     */
+    private static boolean containsNonAsciiLetter(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c > 127 && Character.isLetter(c)) return true;
+        }
+        return false;
     }
 
     private void cleanup(String id) {

@@ -19,6 +19,18 @@ public class SystemInstructions {
         "live-translate", "conversation", "transcribe-extract", "voice-translate"
     );
 
+    /**
+     * Pushes Gemini to render input transcripts (and any text it emits) in the
+     * native script of the detected language rather than romanized Latin. Best-
+     * effort — Gemini's STT pipeline isn't strictly bound by system_instruction,
+     * so {@link TranscriptTransliterator} runs as a deterministic backstop.
+     */
+    private static final String SCRIPT_CLAUSE =
+        "- Always render any transcription or text output in the native script of the detected language "
+            + "(e.g., Gurmukhi for Punjabi, Devanagari for Hindi/Marathi/Nepali, Tamil/Telugu/Kannada/Malayalam/Bengali/Gujarati for those languages, "
+            + "Arabic script for Arabic and Urdu, Hanzi for Mandarin, Hiragana/Kanji for Japanese, Hangul for Korean, Cyrillic for Russian/Ukrainian/Bulgarian). "
+            + "Never romanize transcribed audio — even if you would normally do so for readability.\n";
+
     public static String build(String mode, String sourceLang, String targetLang) {
         boolean isAuto = "auto".equals(sourceLang);
         String srcName = isAuto ? null : LANG_NAMES.getOrDefault(sourceLang, sourceLang);
@@ -54,6 +66,7 @@ public class SystemInstructions {
             + "- If the speaker uses domain-specific terms (medical, dental, legal, real estate), translate them accurately using proper " + tgtName + " terminology.\n"
             + "- If audio is unclear, translate what you can hear. Do not say \"I didn't understand.\"\n"
             + "- Never add text that the speaker did not say.\n"
+            + SCRIPT_CLAUSE
             + "- Respond as quickly as possible — low latency is critical.";
     }
 
@@ -66,6 +79,7 @@ public class SystemInstructions {
             + "\n"
             + "PHASE 1 (during conversation):\n"
             + "- Transcribe the audio accurately. " + phase1 + "\n"
+            + SCRIPT_CLAUSE
             + "- Output the transcription in real-time.\n"
             + "\n"
             + "PHASE 2 (when user says \"summarize\" or session ends):\n"
@@ -107,7 +121,8 @@ public class SystemInstructions {
             + "- Never add text that the speaker did not say.\n"
             + "- Respond as quickly as possible — low latency is critical.\n"
             + "- Keep translations concise and conversational, matching the register of a front-desk interaction.\n"
-            + "- When translating TO a non-English language, ALWAYS use the native script of that language (e.g., Gurmukhi for Punjabi, Devanagari for Hindi, Chinese characters for Mandarin). Never romanize the translation output.";
+            + "- When translating TO a non-English language, ALWAYS use the native script of that language (e.g., Gurmukhi for Punjabi, Devanagari for Hindi, Chinese characters for Mandarin). Never romanize the translation output.\n"
+            + SCRIPT_CLAUSE.stripTrailing();
     }
 
     private static String voiceTranslate(String sourceDesc, String tgtName, String detectClause) {
@@ -121,6 +136,7 @@ public class SystemInstructions {
             + "- Preserve tone and intent.\n"
             + "- Use clear, professional speech.\n"
             + "- Respond as quickly as possible.\n"
+            + SCRIPT_CLAUSE
             + "- Never add content the speaker did not say.";
     }
 }

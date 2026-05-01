@@ -5,5 +5,8 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    // ICU4J — fallback Latin → native-script transliteration for input
+    // transcripts when Gemini's STT romanizes Indic/CJK/Cyrillic speech.
+    implementation 'com.ibm.icu:icu4j:74.2'
     compileOnly     'io.jsonwebtoken:jjwt-api:0.12.6'
 }
