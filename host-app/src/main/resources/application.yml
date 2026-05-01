@@ -63,6 +63,10 @@ pulsar:
     # Required only when history-enabled=true; empty disables history persistence
     # even if a tenant has it switched on (fail-closed).
     history-key: ${PULSAR_TRANSLATE_HISTORY_KEY:}
+    # Platform-default Gemini API key — used when a tenant has not provided
+    # their own key AND has ticked "use platform default" in the admin UI.
+    # Empty here means BYOK is the only path; tenants must onboard their own.
+    default-gemini-key: ${PULSAR_DEFAULT_GEMINI_KEY:}
 
 springdoc:
   api-docs:
