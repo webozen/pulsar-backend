@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pulsar.kernel.auth.JwtService;
 import com.pulsar.kernel.tenant.TenantDataSources;
 import com.pulsar.kernel.tenant.TenantRepository;
+import com.pulsar.translate.GeminiKeyResolver;
 import com.pulsar.translate.TranslateSettings;
 import com.pulsar.translate.TranslateSettingsService;
 import com.pulsar.translate.history.HistoryService;
@@ -39,6 +40,7 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
     private final TenantRepository tenantRepo;
     private final TranslateSettingsService settingsService;
     private final HistoryService historyService;
+    private final GeminiKeyResolver keyResolver;
     private final ConcurrentHashMap<String, TranscriptCollector> collectors = new ConcurrentHashMap<>();
     private final ObjectMapper mapper = new ObjectMapper();
     private final OkHttpClient okClient = new OkHttpClient.Builder()
@@ -83,12 +85,13 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
 
     public GeminiProxyHandler(JwtService jwtService, TenantDataSources tenantDs,
                               TenantRepository tenantRepo, TranslateSettingsService settingsService,
-                              HistoryService historyService) {
+                              HistoryService historyService, GeminiKeyResolver keyResolver) {
         this.jwtService = jwtService;
         this.tenantDs = tenantDs;
         this.tenantRepo = tenantRepo;
         this.settingsService = settingsService;
         this.historyService = historyService;
+        this.keyResolver = keyResolver;
     }
 
     @Override
@@ -246,14 +249,17 @@ public class GeminiProxyHandler extends TextWebSocketHandler {
             return;
         }
 
-        var jdbc = new org.springframework.jdbc.core.JdbcTemplate(tenantDs.forDb(tenant.dbName()));
-        var rows = jdbc.queryForList("SELECT gemini_key FROM translate_config WHERE id = 1");
-        if (rows.isEmpty()) {
-            safeSend(session, Map.of("type", "error", "message", "Gemini key not configured — complete onboarding first"));
+        GeminiKeyResolver.Resolution keyRes = keyResolver.resolveForDb(tenant.dbName());
+        if (keyRes.apiKey() == null) {
+            String reason = keyRes.source() == GeminiKeyResolver.Source.NONE
+                ? "Gemini key not available — complete onboarding or enable platform default"
+                : "Gemini key resolution failed";
+            safeSend(session, Map.of("type", "error", "message", reason));
             closeSession(session, CloseStatus.POLICY_VIOLATION);
             return;
         }
-        String geminiKey = (String) rows.get(0).get("gemini_key");
+        String geminiKey = keyRes.apiKey();
+        log.info("Gemini key resolved: tenant={} source={}", slug, keyRes.source());
 
         String sourceLang = msg.getOrDefault("sourceLang", "auto").toString();
         String targetLang = msg.getOrDefault("targetLang", "en").toString();
