@@ -37,7 +37,7 @@ pulsar:
     passcode: ${PULSAR_ADMIN_PASSCODE:PULS-DEV-0000}
   jwt:
     secret: ${PULSAR_JWT_SECRET:dev-secret-change-me-please-32bytes-minimum-abcdefgh}
-    ttl-seconds: 3600
+    ttl-seconds: ${PULSAR_JWT_TTL_SECONDS:3600}
   mysql:
     # Per-tenant DB pool credentials — env-var-driven, no defaults. Same
     # rationale as spring.datasource above.
@@ -51,6 +51,18 @@ pulsar:
     api-key: ${ANYTHINGLLM_API_KEY:}
   plaud:
     base-url: ${PLAUD_BASE_URL:https://api.plaud.ai}
+  translate:
+    # Platform defaults — per-tenant overrides live in
+    # pulsar_t_<slug>.translate_config and take precedence when non-null.
+    session-duration-min: ${PULSAR_TRANSLATE_SESSION_DURATION_MIN:30}
+    extend-grant-min: ${PULSAR_TRANSLATE_EXTEND_GRANT_MIN:30}
+    max-extends: ${PULSAR_TRANSLATE_MAX_EXTENDS:3}
+    history-enabled: ${PULSAR_TRANSLATE_HISTORY_ENABLED:false}
+    history-retention-days: ${PULSAR_TRANSLATE_HISTORY_RETENTION_DAYS:90}
+    # AES-256-GCM key for conversation transcript at rest. 32-byte base64.
+    # Required only when history-enabled=true; empty disables history persistence
+    # even if a tenant has it switched on (fail-closed).
+    history-key: ${PULSAR_TRANSLATE_HISTORY_KEY:}
 
 springdoc:
   api-docs:
