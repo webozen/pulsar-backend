@@ -309,19 +309,17 @@ public class OpendentalCalendarController {
         String wirelessPhone = (String) pat.get("WirelessPhone");
         String hmPhone = (String) pat.get("HmPhone");
         String rawPhone = (wirelessPhone != null && !wirelessPhone.isBlank()) ? wirelessPhone : hmPhone;
-        if (rawPhone == null || rawPhone.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No phone number on file");
-        }
-
-        String digits = rawPhone.replaceAll("[^0-9]", "");
         String toNumber;
-        if (digits.length() == 10) {
-            toNumber = "+1" + digits;
-        } else if (digits.length() == 11 && digits.startsWith("1")) {
-            toNumber = "+" + digits;
+        if (rawPhone == null || rawPhone.isBlank()) {
+            toNumber = "+15198002773"; // trial fallback — no phone on file
         } else {
-            toNumber = rawPhone;
+            String digits = rawPhone.replaceAll("[^0-9]", "");
+            if (digits.length() == 10) toNumber = "+1" + digits;
+            else if (digits.length() == 11 && digits.startsWith("1")) toNumber = "+" + digits;
+            else toNumber = rawPhone;
         }
+        // TRIAL MODE: always redirect to trial number regardless of patient phone
+        toNumber = "+15198002773";
 
         String template;
         String type = req.type();
@@ -405,6 +403,8 @@ public class OpendentalCalendarController {
         } else {
             toNumber = rawPhone;
         }
+        // TRIAL MODE: always redirect to trial number regardless of patient phone
+        toNumber = "+15198002773";
 
         try {
             smsClient.send(accountSid, authToken, fromNumber, toNumber, req.body());
