@@ -219,7 +219,9 @@ public class OpendentalCalendarController {
         @NotBlank String fromNumber,
         @NotBlank String templateConfirm,
         @NotBlank String templateReminder,
-        @NotBlank String templateReview
+        @NotBlank String templateReview,
+        String clinicName,
+        String clinicAddress
     ) {}
 
     public record SmsPreviewRequest(@NotBlank String type, @NotBlank String aptDateTime) {}
@@ -233,7 +235,8 @@ public class OpendentalCalendarController {
         try {
             var rows = jdbc.queryForList(
                 "SELECT account_sid, auth_token, from_number, template_confirm, " +
-                "template_reminder, template_review FROM opendental_calendar_sms_config WHERE id = 1");
+                "template_reminder, template_review, clinic_name, clinic_address " +
+                "FROM opendental_calendar_sms_config WHERE id = 1");
             if (!rows.isEmpty()) {
                 var row = rows.get(0);
                 String accountSid = (String) row.get("account_sid");
@@ -246,6 +249,8 @@ public class OpendentalCalendarController {
                 result.put("templateConfirm", row.get("template_confirm") != null ? row.get("template_confirm") : "");
                 result.put("templateReminder", row.get("template_reminder") != null ? row.get("template_reminder") : "");
                 result.put("templateReview", row.get("template_review") != null ? row.get("template_review") : "");
+                result.put("clinicName", row.get("clinic_name") != null ? row.get("clinic_name") : "");
+                result.put("clinicAddress", row.get("clinic_address") != null ? row.get("clinic_address") : "");
                 return result;
             }
         } catch (Exception ignored) {}
@@ -257,6 +262,8 @@ public class OpendentalCalendarController {
         empty.put("templateConfirm", "");
         empty.put("templateReminder", "");
         empty.put("templateReview", "");
+        empty.put("clinicName", "");
+        empty.put("clinicAddress", "");
         return empty;
     }
 
@@ -266,14 +273,17 @@ public class OpendentalCalendarController {
         JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(t.dbName()));
         jdbc.update(
             "INSERT INTO opendental_calendar_sms_config " +
-            "(id, account_sid, auth_token, from_number, template_confirm, template_reminder, template_review) " +
-            "VALUES (1, ?, ?, ?, ?, ?, ?) " +
+            "(id, account_sid, auth_token, from_number, template_confirm, template_reminder, template_review, clinic_name, clinic_address) " +
+            "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?) " +
             "ON DUPLICATE KEY UPDATE " +
             "account_sid = VALUES(account_sid), auth_token = VALUES(auth_token), " +
             "from_number = VALUES(from_number), template_confirm = VALUES(template_confirm), " +
-            "template_reminder = VALUES(template_reminder), template_review = VALUES(template_review)",
+            "template_reminder = VALUES(template_reminder), template_review = VALUES(template_review), " +
+            "clinic_name = VALUES(clinic_name), clinic_address = VALUES(clinic_address)",
             req.accountSid(), req.authToken(), req.fromNumber(),
-            req.templateConfirm(), req.templateReminder(), req.templateReview()
+            req.templateConfirm(), req.templateReminder(), req.templateReview(),
+            req.clinicName() != null ? req.clinicName() : "",
+            req.clinicAddress() != null ? req.clinicAddress() : ""
         );
         return Map.of("saved", true);
     }
@@ -346,10 +356,12 @@ public class OpendentalCalendarController {
         String timePart = aptDt.format(DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.US));
 
         String fName = pat.get("FName") != null ? (String) pat.get("FName") : "";
-        // TODO: make clinic name configurable in sms config or calendar config
+        String clinicName = smsRow.get("clinic_name") != null ? (String) smsRow.get("clinic_name") : "";
+        String clinicAddress = smsRow.get("clinic_address") != null ? (String) smsRow.get("clinic_address") : "";
         String preview = template
             .replace("{name}", fName)
-            .replace("{clinic}", "our clinic")
+            .replace("{clinic}", clinicName.isBlank() ? "our clinic" : clinicName)
+            .replace("{address}", clinicAddress)
             .replace("{date}", datePart)
             .replace("{time}", timePart);
 
@@ -422,7 +434,8 @@ public class OpendentalCalendarController {
         try {
             var rows = jdbc.queryForList(
                 "SELECT account_sid, auth_token, from_number, template_confirm, " +
-                "template_reminder, template_review FROM opendental_calendar_sms_config WHERE id = 1");
+                "template_reminder, template_review, clinic_name, clinic_address " +
+                "FROM opendental_calendar_sms_config WHERE id = 1");
             if (!rows.isEmpty()) return rows.get(0);
         } catch (Exception ignored) {}
         return new HashMap<>();
