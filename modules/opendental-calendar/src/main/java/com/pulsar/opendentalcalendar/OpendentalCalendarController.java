@@ -6,6 +6,10 @@ import com.pulsar.kernel.tenant.TenantDataSources;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
@@ -26,10 +30,13 @@ public class OpendentalCalendarController {
 
     private final TenantDataSources tenantDs;
     private final OdCalendarQueryClient client;
+    private final OdCalendarSmsClient smsClient;
 
-    public OpendentalCalendarController(TenantDataSources tenantDs, OdCalendarQueryClient client) {
+    public OpendentalCalendarController(TenantDataSources tenantDs, OdCalendarQueryClient client,
+            OdCalendarSmsClient smsClient) {
         this.tenantDs = tenantDs;
         this.client = client;
+        this.smsClient = smsClient;
     }
 
     public record ConfigRequest(
@@ -203,6 +210,180 @@ public class OpendentalCalendarController {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
         }
     }
+
+    // ── SMS Config ────────────────────────────────────────────────────────────
+
+    public record SmsConfigRequest(
+        @NotBlank String accountSid,
+        @NotBlank String authToken,
+        @NotBlank String fromNumber,
+        @NotBlank String templateConfirm,
+        @NotBlank String templateReminder,
+        @NotBlank String templateReview
+    ) {}
+
+    public record SmsPreviewRequest(String type, String aptDateTime) {}
+
+    public record SmsSendRequest(String type, String body, String to) {}
+
+    @GetMapping("/sms-config")
+    public Map<String, Object> getSmsConfig() {
+        var t = TenantContext.require();
+        JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(t.dbName()));
+        try {
+            var rows = jdbc.queryForList(
+                "SELECT account_sid, auth_token, from_number, template_confirm, " +
+                "template_reminder, template_review FROM opendental_calendar_sms_config WHERE id = 1");
+            if (!rows.isEmpty()) {
+                var row = rows.get(0);
+                String accountSid = (String) row.get("account_sid");
+                boolean enabled = accountSid != null && !accountSid.isBlank();
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("enabled", enabled);
+                result.put("accountSid", accountSid != null ? accountSid : "");
+                result.put("authToken", "••••");
+                result.put("fromNumber", row.get("from_number") != null ? row.get("from_number") : "");
+                result.put("templateConfirm", row.get("template_confirm") != null ? row.get("template_confirm") : "");
+                result.put("templateReminder", row.get("template_reminder") != null ? row.get("template_reminder") : "");
+                result.put("templateReview", row.get("template_review") != null ? row.get("template_review") : "");
+                return result;
+            }
+        } catch (Exception ignored) {}
+        Map<String, Object> empty = new LinkedHashMap<>();
+        empty.put("enabled", false);
+        empty.put("accountSid", "");
+        empty.put("authToken", "");
+        empty.put("fromNumber", "");
+        empty.put("templateConfirm", "");
+        empty.put("templateReminder", "");
+        empty.put("templateReview", "");
+        return empty;
+    }
+
+    @PostMapping("/sms-config")
+    public Map<String, Object> saveSmsConfig(@Valid @RequestBody SmsConfigRequest req) {
+        var t = TenantContext.require();
+        JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(t.dbName()));
+        jdbc.update(
+            "INSERT INTO opendental_calendar_sms_config " +
+            "(id, account_sid, auth_token, from_number, template_confirm, template_reminder, template_review) " +
+            "VALUES (1, ?, ?, ?, ?, ?, ?) " +
+            "ON DUPLICATE KEY UPDATE " +
+            "account_sid = VALUES(account_sid), auth_token = VALUES(auth_token), " +
+            "from_number = VALUES(from_number), template_confirm = VALUES(template_confirm), " +
+            "template_reminder = VALUES(template_reminder), template_review = VALUES(template_review)",
+            req.accountSid(), req.authToken(), req.fromNumber(),
+            req.templateConfirm(), req.templateReminder(), req.templateReview()
+        );
+        return Map.of("saved", true);
+    }
+
+    @PostMapping("/patients/{patNum}/preview-sms")
+    public Map<String, Object> previewSms(@PathVariable long patNum,
+            @RequestBody SmsPreviewRequest req) {
+        var smsRow = loadSmsConfig();
+        String accountSid = (String) smsRow.get("account_sid");
+        if (accountSid == null || accountSid.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "SMS not configured");
+        }
+
+        var keys = loadKeys();
+        List<Map<String, Object>> patRows;
+        try {
+            patRows = client.query(keys.devKey(), keys.custKey(),
+                "SELECT FName, TxtMsgOk, WirelessPhone, HmPhone FROM patient WHERE PatNum = " + patNum);
+        } catch (IOException | OdCalendarQueryClient.OdException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+        if (patRows.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Patient not found");
+        }
+        var pat = patRows.get(0);
+
+        Object txtMsgOk = pat.get("TxtMsgOk");
+        if (txtMsgOk != null && "0".equals(String.valueOf(txtMsgOk))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Patient has opted out of text messages");
+        }
+
+        String wirelessPhone = (String) pat.get("WirelessPhone");
+        String hmPhone = (String) pat.get("HmPhone");
+        String rawPhone = (wirelessPhone != null && !wirelessPhone.isBlank()) ? wirelessPhone : hmPhone;
+        if (rawPhone == null || rawPhone.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No phone number on file");
+        }
+
+        String digits = rawPhone.replaceAll("[^0-9]", "");
+        String toNumber;
+        if (digits.length() == 10) {
+            toNumber = "+1" + digits;
+        } else if (digits.length() == 11 && digits.startsWith("1")) {
+            toNumber = "+" + digits;
+        } else {
+            toNumber = rawPhone;
+        }
+
+        String template;
+        String type = req.type();
+        if ("confirm".equals(type)) {
+            template = (String) smsRow.get("template_confirm");
+        } else if ("remind".equals(type)) {
+            template = (String) smsRow.get("template_reminder");
+        } else if ("review".equals(type)) {
+            template = (String) smsRow.get("template_review");
+        } else {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "type must be confirm, remind, or review");
+        }
+        if (template == null) template = "";
+
+        DateTimeFormatter inputFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        LocalDateTime aptDt = LocalDateTime.parse(req.aptDateTime(), inputFmt);
+        String datePart = aptDt.format(DateTimeFormatter.ofPattern("EEEE, MMMM d"));
+        String timePart = aptDt.format(DateTimeFormatter.ofPattern("h:mm a"));
+
+        String fName = pat.get("FName") != null ? (String) pat.get("FName") : "";
+        String preview = template
+            .replace("{name}", fName)
+            .replace("{clinic}", "our clinic")
+            .replace("{date}", datePart)
+            .replace("{time}", timePart);
+
+        return Map.of("to", toNumber, "preview", preview);
+    }
+
+    @PostMapping("/patients/{patNum}/send-sms")
+    public Map<String, Object> sendSms(@PathVariable long patNum,
+            @RequestBody SmsSendRequest req) {
+        var smsRow = loadSmsConfig();
+        String accountSid = (String) smsRow.get("account_sid");
+        if (accountSid == null || accountSid.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "SMS not configured");
+        }
+        String authToken = (String) smsRow.get("auth_token");
+        String fromNumber = (String) smsRow.get("from_number");
+
+        try {
+            smsClient.send(accountSid, authToken, fromNumber, req.to(), req.body());
+        } catch (OdCalendarSmsClient.TwilioException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+        return Map.of("sent", true, "to", req.to());
+    }
+
+    private Map<String, Object> loadSmsConfig() {
+        var t = TenantContext.require();
+        JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(t.dbName()));
+        try {
+            var rows = jdbc.queryForList(
+                "SELECT account_sid, auth_token, from_number, template_confirm, " +
+                "template_reminder, template_review FROM opendental_calendar_sms_config WHERE id = 1");
+            if (!rows.isEmpty()) return rows.get(0);
+        } catch (Exception ignored) {}
+        return new HashMap<>();
+    }
+
+    // ── OD Keys ───────────────────────────────────────────────────────────────
 
     private record Keys(String devKey, String custKey) {}
 
