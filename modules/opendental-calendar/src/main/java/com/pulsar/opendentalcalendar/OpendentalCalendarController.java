@@ -358,12 +358,50 @@ public class OpendentalCalendarController {
         String timePart = aptDt.format(DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.US));
 
         String fName = pat.get("FName") != null ? (String) pat.get("FName") : "";
-        String clinicName = smsRow.get("clinic_name") != null ? (String) smsRow.get("clinic_name") : "";
-        String clinicAddress = smsRow.get("clinic_address") != null ? (String) smsRow.get("clinic_address") : "";
+
+        // Look up clinic from OD via the appointment's ClinicNum
+        String clinicName = "";
+        String clinicAddress = "";
+        String clinicPhone = "";
+        try {
+            String aptDate = req.aptDateTime().substring(0, 10);
+            String aptTime = req.aptDateTime().substring(11);
+            var clinicRows = client.query(keys.devKey(), keys.custKey(),
+                "SELECT c.Description, c.Address, c.City, c.State, c.Zip, c.Phone " +
+                "FROM appointment a " +
+                "LEFT JOIN clinic c ON a.ClinicNum = c.ClinicNum " +
+                "WHERE a.PatNum = " + patNum + " " +
+                "AND DATE(a.AptDateTime) = '" + aptDate + "' " +
+                "AND TIME(a.AptDateTime) = '" + aptTime + "' " +
+                "LIMIT 1");
+            if (!clinicRows.isEmpty()) {
+                var c = clinicRows.get(0);
+                clinicName    = c.get("Description") != null ? String.valueOf(c.get("Description")) : "";
+                String addr   = c.get("Address")     != null ? String.valueOf(c.get("Address"))     : "";
+                String city   = c.get("City")        != null ? String.valueOf(c.get("City"))        : "";
+                String state  = c.get("State")       != null ? String.valueOf(c.get("State"))       : "";
+                String zip    = c.get("Zip")         != null ? String.valueOf(c.get("Zip"))         : "";
+                clinicPhone   = c.get("Phone")       != null ? String.valueOf(c.get("Phone"))       : "";
+                clinicAddress = java.util.stream.Stream.of(addr, city, state, zip)
+                    .filter(s -> s != null && !s.isBlank()).collect(java.util.stream.Collectors.joining(", "));
+            }
+        } catch (Exception ignored) {}
+        // Fall back to SMS config values if OD clinic lookup returned nothing
+        if (clinicName.isBlank())    clinicName    = smsRow.get("clinic_name")    != null ? (String) smsRow.get("clinic_name")    : "";
+        if (clinicAddress.isBlank()) clinicAddress = smsRow.get("clinic_address") != null ? (String) smsRow.get("clinic_address") : "";
+
         String preview = template
+            .replace("{patientName}", fName)
+            .replace("{clinicName}", clinicName.isBlank() ? "our clinic" : clinicName)
+            .replace("{clinicAddress}", clinicAddress)
+            .replace("{clinicPhone}", clinicPhone)
+            .replace("{appointmentDate}", datePart)
+            .replace("{appointmentTime}", timePart)
+            // short aliases kept for backwards-compat with existing templates
             .replace("{name}", fName)
             .replace("{clinic}", clinicName.isBlank() ? "our clinic" : clinicName)
             .replace("{address}", clinicAddress)
+            .replace("{phone}", clinicPhone)
             .replace("{date}", datePart)
             .replace("{time}", timePart);
 
