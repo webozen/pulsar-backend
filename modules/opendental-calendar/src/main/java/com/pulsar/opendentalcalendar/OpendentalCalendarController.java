@@ -103,7 +103,7 @@ public class OpendentalCalendarController {
             "JOIN operatory o ON a.Op = o.OperatoryNum " +
             "JOIN provider prov ON a.ProvNum = prov.ProvNum " +
             "WHERE DATE(a.AptDateTime) = '" + date + "' " +
-            "  AND a.AptStatus = 1 " +
+            "  AND a.AptStatus IN (1, 2, 5) " + // 1=Scheduled, 2=Complete, 5=Broken
             "ORDER BY a.AptDateTime";
         try {
             return client.query(keys.devKey(), keys.custKey(), sql);
