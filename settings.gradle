@@ -20,6 +20,7 @@ include ':modules:text-copilot'      // generic — live SMS reply suggestions
 // -Pdomain=<name> profile is passed to bootJar (see host-app/build.gradle).
 include ':modules:opendental'     // dental
 include ':modules:opendental-ai'  // dental
+include ':modules:opendental-calendar'  // dental
 include ':modules:caller-match'   // dental
 include ':modules:call-intel'     // dental
 include ':modules:copilot'        // dental

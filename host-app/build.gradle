@@ -35,6 +35,7 @@ def domainModules = [
     dental: [
         ':modules:opendental',
         ':modules:opendental-ai',
+        ':modules:opendental-calendar',
         ':modules:caller-match',
         ':modules:call-intel',
         ':modules:copilot',
