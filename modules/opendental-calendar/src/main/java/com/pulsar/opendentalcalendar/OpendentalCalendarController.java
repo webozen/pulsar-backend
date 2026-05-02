@@ -301,7 +301,8 @@ public class OpendentalCalendarController {
         var pat = patRows.get(0);
 
         Object txtMsgOk = pat.get("TxtMsgOk");
-        if (txtMsgOk != null && "0".equals(String.valueOf(txtMsgOk))) {
+        // TxtMsgOk: 0=Unknown, 1=Yes, 2=No (explicitly opted out). Block only value "2".
+        if (txtMsgOk != null && "2".equals(String.valueOf(txtMsgOk))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Patient has opted out of text messages");
         }
 
@@ -383,7 +384,8 @@ public class OpendentalCalendarController {
         var pat = patRows.get(0);
 
         Object txtMsgOk = pat.get("TxtMsgOk");
-        if (txtMsgOk != null && "0".equals(String.valueOf(txtMsgOk))) {
+        // TxtMsgOk: 0=Unknown, 1=Yes, 2=No (explicitly opted out). Block only value "2".
+        if (txtMsgOk != null && "2".equals(String.valueOf(txtMsgOk))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Patient has opted out of text messages");
         }
 
