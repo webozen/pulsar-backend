@@ -12,6 +12,7 @@ allprojects {
 subprojects {
     apply plugin: 'java'
     apply plugin: 'io.spring.dependency-management'
+    apply plugin: 'jacoco'
 
     java {
         toolchain { languageVersion = JavaLanguageVersion.of(21) }
@@ -38,5 +39,34 @@ subprojects {
 
     test {
         useJUnitPlatform()
+        finalizedBy jacocoTestReport
     }
+
+    jacocoTestReport {
+        dependsOn test
+        reports {
+            xml.required = true
+            html.required = true
+        }
+    }
+}
+
+// Per-package coverage gate — fails CI if the new credentials package
+// drifts below the threshold without an explicit follow-up. Wired only
+// to :kernel because that's where CredentialsService lives in Phase 1.
+project(':kernel') {
+    jacocoTestCoverageVerification {
+        dependsOn test
+        violationRules {
+            rule {
+                element = 'PACKAGE'
+                includes = ['com.pulsar.kernel.credentials']
+                limit {
+                    counter = 'LINE'
+                    minimum = 0.80
+                }
+            }
+        }
+    }
+    check.dependsOn jacocoTestCoverageVerification
 }

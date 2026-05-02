@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pulsar.kernel.auth.JwtService;
 import com.pulsar.kernel.tenant.TenantDataSources;
 import com.pulsar.kernel.tenant.TenantRepository;
-import com.pulsar.translate.GeminiKeyResolver;
+import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import com.pulsar.translate.TranslateSettings;
 import com.pulsar.translate.TranslateSettingsService;
 import com.pulsar.translate.history.HistoryService;

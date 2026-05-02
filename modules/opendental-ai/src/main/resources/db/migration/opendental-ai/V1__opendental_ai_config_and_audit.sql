@@ -1,10 +1,12 @@
 -- Per-tenant config for the OpenDental AI module.
--- gemini_key      — Google AI Studio key for this tenant's Live API session
 -- od_developer_key — OpenDental DeveloperKey (paid, one per vendor app)
 -- od_customer_key  — OpenDental CustomerKey (one per customer database)
+--
+-- The Gemini API key is centrally managed in `tenant_credentials` (kernel V1)
+-- and resolved via the kernel CredentialsService — it is NOT stored here.
+-- (Phase 2 will move od_developer_key + od_customer_key to tenant_credentials too.)
 CREATE TABLE opendental_ai_config (
     id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    gemini_key       TEXT          NOT NULL,
     od_developer_key TEXT          NOT NULL,
     od_customer_key  TEXT          NOT NULL,
     updated_at       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP

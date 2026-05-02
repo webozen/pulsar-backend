@@ -39,8 +39,13 @@ public class OpendentalAiOnboardingController {
         this.events = events;
     }
 
+    /**
+     * Wizard payload for OpenDental AI. The Gemini key is NOT collected here —
+     * it lives in {@code tenant_credentials} and is set via the admin tenant
+     * detail page or the tenant Settings page. (Phase 2 will move OD keys
+     * there too.)
+     */
     public record ConfigRequest(
-        @NotBlank String geminiKey,
         @NotBlank String odDeveloperKey,
         @NotBlank String odCustomerKey
     ) {}
@@ -58,23 +63,20 @@ public class OpendentalAiOnboardingController {
         var t = TenantContext.require();
         JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(t.dbName()));
         jdbc.update(
-            "INSERT INTO opendental_ai_config (id, gemini_key, od_developer_key, od_customer_key) " +
-            "VALUES (1, ?, ?, ?) " +
-            "ON DUPLICATE KEY UPDATE gemini_key = VALUES(gemini_key), " +
-            "od_developer_key = VALUES(od_developer_key), " +
+            "INSERT INTO opendental_ai_config (id, od_developer_key, od_customer_key) " +
+            "VALUES (1, ?, ?) " +
+            "ON DUPLICATE KEY UPDATE od_developer_key = VALUES(od_developer_key), " +
             "od_customer_key = VALUES(od_customer_key)",
-            req.geminiKey(), req.odDeveloperKey(), req.odCustomerKey()
+            req.odDeveloperKey(), req.odCustomerKey()
         );
-        // Push the same credentials to the workflow platform's namespace so
-        // dental Kestra flows (recall-reminder etc.) can use them as secrets.
+        // Push OD secrets to the workflow platform's namespace for dental
+        // Kestra flows (recall-reminder etc.). GEMINI_API_KEY is propagated
+        // separately by CredentialsService write paths.
         tenantRepo.findBySlug(t.slug()).ifPresent(rec ->
-            events.publishEvent(new TenantEvents.TenantSecretsUpdated(
-                rec.id(), rec.slug(), Map.of(
-                    "GEMINI_API_KEY", req.geminiKey(),
-                    "OPENDENTAL_DEVELOPER_KEY", req.odDeveloperKey(),
-                    "OPENDENTAL_CUSTOMER_KEY", req.odCustomerKey()
-                )
-            ))
+            events.publishEvent(new TenantEvents.TenantSecretsUpdated(rec.id(), rec.slug(), Map.of(
+                "OPENDENTAL_DEVELOPER_KEY", req.odDeveloperKey(),
+                "OPENDENTAL_CUSTOMER_KEY", req.odCustomerKey()
+            )))
         );
         return Map.of("onboarded", true);
     }

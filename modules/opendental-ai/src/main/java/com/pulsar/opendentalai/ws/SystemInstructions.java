@@ -10,7 +10,7 @@ import com.pulsar.opendentalai.schema.SchemaCatalog;
 public final class SystemInstructions {
     private SystemInstructions() {}
 
-    public static String build(SchemaCatalog catalog, String tenantSlug) {
+    public static String build(SchemaCatalog catalog, String tenantSlug, String timezone) {
         // Two tiers: a small, fixed policy prose + an optional schema section.
         // Setting INCLUDE_SCHEMA_IN_PROMPT=false gives us a minimal ~500 char prompt
         // so we can verify the Gemini Live + tool-calling loop works before loading
@@ -23,9 +23,14 @@ public final class SystemInstructions {
             `run_opendental_query` with a read-only MySQL SELECT against the practice's
             OpenDental database. Summarise results in plain English. Never fabricate
             numbers. If ambiguous, ask ONE clarifying question. Only SELECTs; the
-            backend rejects writes. Auto-LIMIT 1000.""".formatted(tenantSlug);
+            backend rejects writes. Auto-LIMIT 1000. Interpret all dates and times
+            in the practice's local timezone: %s.""".formatted(tenantSlug, timezone);
 
         if (!includeSchema) return policy;
         return policy + "\n\n" + catalog.asPromptContext();
+    }
+
+    public static String build(SchemaCatalog catalog, String tenantSlug) {
+        return build(catalog, tenantSlug, "America/New_York");
     }
 }

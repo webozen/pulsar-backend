@@ -52,6 +52,11 @@ jobs:
       - name: Gradle test (all modules)
         run: ./gradlew test --no-daemon
 
+      - name: Coverage gate (kernel.credentials)
+        # Fails the build if the centralized credentials package drops below
+        # the 80% line-coverage threshold pinned in build.gradle.
+        run: ./gradlew :kernel:jacocoTestCoverageVerification --no-daemon
+
       - name: Upload test reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -60,4 +65,14 @@ jobs:
           path: |
             **/build/reports/tests/test/
             **/build/test-results/test/
+            **/build/reports/jacoco/test/
           retention-days: 14
+
+      - name: Upload coverage HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-html
+          path: kernel/build/reports/jacoco/test/html/
+          retention-days: 14
+          if-no-files-found: ignore

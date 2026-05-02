@@ -28,6 +28,11 @@ public class TenantMigrationSweeper implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         for (TenantRecord t : repo.findAll()) {
+            try {
+                migrations.migrateKernel(t.dbName());
+            } catch (Exception e) {
+                log.warn("Failed to migrate kernel for tenant {}: {}", t.slug(), e.toString());
+            }
             for (String modId : t.activeModules()) {
                 ModuleDefinition def = modules.get(modId);
                 if (def == null) continue;

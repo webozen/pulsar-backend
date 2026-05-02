@@ -1,52 +1,42 @@
 package com.pulsar.translate;
 
+import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import com.pulsar.kernel.security.RequireModule;
 import com.pulsar.kernel.tenant.TenantContext;
-import com.pulsar.kernel.tenant.TenantDataSources;
-import jakarta.validation.constraints.NotBlank;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
+/**
+ * Read-only onboarding status for the translate wizard. The Gemini key itself
+ * is set/cleared via {@code /api/admin/tenants/{id}/api-keys/gemini} (super-admin)
+ * or {@code /api/tenant/credentials/gemini} (tenant-admin) — not here.
+ *
+ * <p>This controller used to write {@code translate_config.gemini_key}; that
+ * column was dropped in the pre-v1 cleanup. The wizard now only queries this
+ * endpoint to render "configured / not configured" status.
+ */
 @RestController
 @RequestMapping("/api/translate/onboarding")
 @RequireModule("translate")
 public class TranslateOnboardingController {
 
-    private final TenantDataSources tenantDs;
+    private final GeminiKeyResolver geminiKeyResolver;
 
-    public TranslateOnboardingController(TenantDataSources tenantDs) {
-        this.tenantDs = tenantDs;
+    public TranslateOnboardingController(GeminiKeyResolver geminiKeyResolver) {
+        this.geminiKeyResolver = geminiKeyResolver;
     }
-
-    public record KeyRequest(@NotBlank String geminiKey) {}
 
     @GetMapping
     public Map<String, Object> status() {
-        return jdbc().queryForList("SELECT configured_at FROM translate_config WHERE id = 1")
-            .stream().findFirst()
-            .map(row -> Map.of("configured", (Object) true, "configuredAt", row.get("configured_at").toString()))
-            .orElse(Map.of("configured", false));
-    }
-
-    @PostMapping
-    public Map<String, Object> configure(@RequestBody KeyRequest req) {
-        jdbc().update(
-            "INSERT INTO translate_config (id, gemini_key) VALUES (1, ?) " +
-            "ON DUPLICATE KEY UPDATE gemini_key = VALUES(gemini_key), configured_at = NOW()",
-            req.geminiKey()
-        );
-        return Map.of("configured", true);
-    }
-
-    @DeleteMapping
-    public Map<String, Object> remove() {
-        jdbc().update("DELETE FROM translate_config WHERE id = 1");
-        return Map.of("configured", false);
-    }
-
-    private JdbcTemplate jdbc() {
-        return new JdbcTemplate(tenantDs.forDb(TenantContext.require().dbName()));
+        var t = TenantContext.require();
+        GeminiKeyResolver.TenantKeyStatus s = geminiKeyResolver.statusForDb(t.dbName());
+        // Wizard only needs the boolean — drop the prior `configuredAt` field
+        // (that column tracked the legacy gemini_key write timestamp; the
+        // canonical "when was this set" lives in tenant_credentials.updated_at
+        // and isn't user-facing today).
+        return Map.of("configured", s.hasTenantKey() || s.useDefault());
     }
 }

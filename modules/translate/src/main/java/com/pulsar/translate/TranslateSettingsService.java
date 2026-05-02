@@ -97,11 +97,9 @@ public class TranslateSettingsService {
         Integer historyRetentionDays
     ) {
         JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(dbName));
-        // Ensure a row exists. The Gemini key is required by the V1 schema, so
-        // if onboarding hasn't happened yet, the admin can still pre-set
-        // settings — we insert a placeholder key that onboarding will overwrite.
+        // Ensure a row exists so settings can be pre-set before onboarding runs.
         jdbc.update(
-            "INSERT INTO translate_config (id, gemini_key) VALUES (1, '') "
+            "INSERT INTO translate_config (id) VALUES (1) "
                 + "ON DUPLICATE KEY UPDATE id = id");
         jdbc.update(
             "UPDATE translate_config SET "

@@ -19,10 +19,21 @@ public class MigrationRunner {
 
     /** Baseline: create schema + run migrations for currently-active modules. */
     public void migrateTenant(String dbName, Set<String> activeModuleIds) {
+        migrateKernel(dbName);
         for (String id : activeModuleIds) {
             if (!modules.exists(id)) continue;
             migrateModule(dbName, modules.get(id));
         }
+    }
+
+    /**
+     * Run kernel-level migrations on a tenant DB. These are always applied,
+     * independent of which modules are activated. Hosts the cross-cutting
+     * tables — {@code tenant_credentials} today; future kernel-owned tables
+     * land here too.
+     */
+    public void migrateKernel(String dbName) {
+        runFlyway(dbName, "classpath:db/migration/kernel", "flyway_schema_history_kernel");
     }
 
     /**
