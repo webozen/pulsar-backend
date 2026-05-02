@@ -41,7 +41,8 @@ public class OdCalendarSmsClient {
         try (Response resp = http.newCall(req).execute()) {
             String text = resp.body() == null ? "" : resp.body().string();
             if (resp.code() != 201) {
-                throw new TwilioException(text);
+                String truncated = text.length() > 240 ? text.substring(0, 240) + "…" : text;
+                throw new TwilioException("Twilio " + resp.code() + ": " + truncated);
             }
         }
     }

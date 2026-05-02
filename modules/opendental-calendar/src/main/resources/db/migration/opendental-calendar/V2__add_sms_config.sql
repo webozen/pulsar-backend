@@ -1,7 +1,7 @@
 CREATE TABLE opendental_calendar_sms_config (
     id                  INT PRIMARY KEY DEFAULT 1,
-    account_sid         VARCHAR(64)  NOT NULL DEFAULT '',
-    auth_token          VARCHAR(64)  NOT NULL DEFAULT '',
+    account_sid         VARCHAR(128) NOT NULL DEFAULT '',
+    auth_token          VARCHAR(128) NOT NULL DEFAULT '',
     from_number         VARCHAR(20)  NOT NULL DEFAULT '',
     template_confirm    TEXT         NOT NULL,
     template_reminder   TEXT         NOT NULL,

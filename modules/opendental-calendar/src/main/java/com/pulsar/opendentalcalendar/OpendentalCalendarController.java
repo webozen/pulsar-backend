@@ -222,9 +222,9 @@ public class OpendentalCalendarController {
         @NotBlank String templateReview
     ) {}
 
-    public record SmsPreviewRequest(String type, String aptDateTime) {}
+    public record SmsPreviewRequest(@NotBlank String type, @NotBlank String aptDateTime) {}
 
-    public record SmsSendRequest(String type, String body, String to) {}
+    public record SmsSendRequest(@NotBlank String body) {}
 
     @GetMapping("/sms-config")
     public Map<String, Object> getSmsConfig() {
@@ -280,7 +280,7 @@ public class OpendentalCalendarController {
 
     @PostMapping("/patients/{patNum}/preview-sms")
     public Map<String, Object> previewSms(@PathVariable long patNum,
-            @RequestBody SmsPreviewRequest req) {
+            @Valid @RequestBody SmsPreviewRequest req) {
         var smsRow = loadSmsConfig();
         String accountSid = (String) smsRow.get("account_sid");
         if (accountSid == null || accountSid.isBlank()) {
@@ -336,11 +336,18 @@ public class OpendentalCalendarController {
         if (template == null) template = "";
 
         DateTimeFormatter inputFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-        LocalDateTime aptDt = LocalDateTime.parse(req.aptDateTime(), inputFmt);
-        String datePart = aptDt.format(DateTimeFormatter.ofPattern("EEEE, MMMM d"));
-        String timePart = aptDt.format(DateTimeFormatter.ofPattern("h:mm a"));
+        LocalDateTime aptDt;
+        try {
+            aptDt = LocalDateTime.parse(req.aptDateTime(), inputFmt);
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "Invalid aptDateTime format: expected yyyy-MM-dd HH:mm:ss");
+        }
+        String datePart = aptDt.format(DateTimeFormatter.ofPattern("EEEE, MMMM d", java.util.Locale.US));
+        String timePart = aptDt.format(DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.US));
 
         String fName = pat.get("FName") != null ? (String) pat.get("FName") : "";
+        // TODO: make clinic name configurable in sms config or calendar config
         String preview = template
             .replace("{name}", fName)
             .replace("{clinic}", "our clinic")
@@ -352,7 +359,7 @@ public class OpendentalCalendarController {
 
     @PostMapping("/patients/{patNum}/send-sms")
     public Map<String, Object> sendSms(@PathVariable long patNum,
-            @RequestBody SmsSendRequest req) {
+            @Valid @RequestBody SmsSendRequest req) {
         var smsRow = loadSmsConfig();
         String accountSid = (String) smsRow.get("account_sid");
         if (accountSid == null || accountSid.isBlank()) {
@@ -361,14 +368,50 @@ public class OpendentalCalendarController {
         String authToken = (String) smsRow.get("auth_token");
         String fromNumber = (String) smsRow.get("from_number");
 
+        // Re-derive phone number from patient record — never trust caller-supplied destination
+        var keys = loadKeys();
+        List<Map<String, Object>> patRows;
         try {
-            smsClient.send(accountSid, authToken, fromNumber, req.to(), req.body());
+            patRows = client.query(keys.devKey(), keys.custKey(),
+                "SELECT TxtMsgOk, WirelessPhone, HmPhone FROM patient WHERE PatNum = " + patNum);
+        } catch (IOException | OdCalendarQueryClient.OdException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+        if (patRows.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Patient not found");
+        }
+        var pat = patRows.get(0);
+
+        Object txtMsgOk = pat.get("TxtMsgOk");
+        if (txtMsgOk != null && "0".equals(String.valueOf(txtMsgOk))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Patient has opted out of text messages");
+        }
+
+        String wirelessPhone = (String) pat.get("WirelessPhone");
+        String hmPhone = (String) pat.get("HmPhone");
+        String rawPhone = (wirelessPhone != null && !wirelessPhone.isBlank()) ? wirelessPhone : hmPhone;
+        if (rawPhone == null || rawPhone.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No phone number on file");
+        }
+
+        String digits = rawPhone.replaceAll("[^0-9]", "");
+        String toNumber;
+        if (digits.length() == 10) {
+            toNumber = "+1" + digits;
+        } else if (digits.length() == 11 && digits.startsWith("1")) {
+            toNumber = "+" + digits;
+        } else {
+            toNumber = rawPhone;
+        }
+
+        try {
+            smsClient.send(accountSid, authToken, fromNumber, toNumber, req.body());
         } catch (OdCalendarSmsClient.TwilioException e) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
         }
-        return Map.of("sent", true, "to", req.to());
+        return Map.of("sent", true, "to", toNumber);
     }
 
     private Map<String, Object> loadSmsConfig() {
