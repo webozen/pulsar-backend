@@ -215,7 +215,7 @@ public class OpendentalCalendarController {
 
     public record SmsConfigRequest(
         @NotBlank String accountSid,
-        @NotBlank String authToken,
+        String authToken,   // optional on update — blank means keep existing token
         @NotBlank String fromNumber,
         @NotBlank String templateConfirm,
         @NotBlank String templateReminder,
@@ -271,16 +271,18 @@ public class OpendentalCalendarController {
     public Map<String, Object> saveSmsConfig(@Valid @RequestBody SmsConfigRequest req) {
         var t = TenantContext.require();
         JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(t.dbName()));
+        boolean hasNewToken = req.authToken() != null && !req.authToken().isBlank();
+        String authTokenUpdate = hasNewToken ? "auth_token = VALUES(auth_token), " : "";
         jdbc.update(
             "INSERT INTO opendental_calendar_sms_config " +
             "(id, account_sid, auth_token, from_number, template_confirm, template_reminder, template_review, clinic_name, clinic_address) " +
             "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?) " +
             "ON DUPLICATE KEY UPDATE " +
-            "account_sid = VALUES(account_sid), auth_token = VALUES(auth_token), " +
+            "account_sid = VALUES(account_sid), " + authTokenUpdate +
             "from_number = VALUES(from_number), template_confirm = VALUES(template_confirm), " +
             "template_reminder = VALUES(template_reminder), template_review = VALUES(template_review), " +
             "clinic_name = VALUES(clinic_name), clinic_address = VALUES(clinic_address)",
-            req.accountSid(), req.authToken(), req.fromNumber(),
+            req.accountSid(), hasNewToken ? req.authToken() : "", req.fromNumber(),
             req.templateConfirm(), req.templateReminder(), req.templateReview(),
             req.clinicName() != null ? req.clinicName() : "",
             req.clinicAddress() != null ? req.clinicAddress() : ""
