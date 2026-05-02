@@ -12,8 +12,8 @@ public class OpendentalCalendarModule implements ModuleDefinition {
     @Override public ModuleManifest manifest() {
         return new ModuleManifest(
             "opendental-calendar",
-            "OpenDental Calendar",
-            "Full operatory calendar view of today's scheduled appointments.",
+            "OpenDental",
+            "Appointments, patient records, and SMS — powered by OpenDental.",
             "📅",
             "dental"
         );
