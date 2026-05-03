@@ -51,6 +51,15 @@ services:
       PULSAR_AUTOMATION_SYNC_SECRET: ${PULSAR_AUTOMATION_SYNC_SECRET:-dev-sync-secret}
       ANYTHINGLLM_URL: ${ANYTHINGLLM_URL:-http://host.docker.internal:3001}
       ANYTHINGLLM_API_KEY: ${ANYTHINGLLM_API_KEY:-}
+      # Platform-level secrets. Forward whatever is in .env (no default
+      # value — empty string means "feature disabled" in both cases):
+      #  - CREDENTIALS_MASTER_KEY: AES-256-GCM key for tenant_credentials
+      #    (when unset, values are stored plaintext — OK for dev only).
+      #  - TRANSLATE_HISTORY_KEY: AES-256-GCM key for translate
+      #    conversation history (when unset, the historyAvailable flag
+      #    in the admin UI stays false and history toggles do nothing).
+      PULSAR_CREDENTIALS_MASTER_KEY: ${PULSAR_CREDENTIALS_MASTER_KEY:-}
+      PULSAR_TRANSLATE_HISTORY_KEY: ${PULSAR_TRANSLATE_HISTORY_KEY:-}
     ports:
       - "18080:18080"
     extra_hosts:
