@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pulsar.kernel.auth.JwtService;
 import com.pulsar.kernel.credentials.GeminiKeyResolver;
+import com.pulsar.kernel.credentials.OpenDentalKeyResolver;
 import com.pulsar.kernel.tenant.TenantDataSources;
 import com.pulsar.kernel.tenant.TenantRepository;
 import com.pulsar.opendentalai.opendental.OpendentalQueryClient;
@@ -72,6 +73,7 @@ public class CoPilotHandler extends TextWebSocketHandler {
     private final TenantDataSources tenantDs;
     private final OpendentalQueryClient odClient;
     private final GeminiKeyResolver geminiKeyResolver;
+    private final OpenDentalKeyResolver opendentalKeyResolver;
     private final ObjectMapper mapper = new ObjectMapper();
     private final OkHttpClient okClient = new OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS).build();
@@ -85,12 +87,14 @@ public class CoPilotHandler extends TextWebSocketHandler {
     private record Session(String tenantSlug, String tenantDbName, String odDeveloperKey, String odCustomerKey) {}
 
     public CoPilotHandler(JwtService jwt, TenantRepository tenantRepo, TenantDataSources tenantDs,
-                          OpendentalQueryClient odClient, GeminiKeyResolver geminiKeyResolver) {
+                          OpendentalQueryClient odClient, GeminiKeyResolver geminiKeyResolver,
+                          OpenDentalKeyResolver opendentalKeyResolver) {
         this.jwt = jwt;
         this.tenantRepo = tenantRepo;
         this.tenantDs = tenantDs;
         this.odClient = odClient;
         this.geminiKeyResolver = geminiKeyResolver;
+        this.opendentalKeyResolver = opendentalKeyResolver;
     }
 
     @Override
@@ -148,15 +152,15 @@ public class CoPilotHandler extends TextWebSocketHandler {
         if (rec == null) { deny(session, "tenant_not_found"); return; }
         if (!rec.activeModules().contains("call-handling")) { deny(session, "module_not_active"); return; }
 
-        JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(rec.dbName()));
-        var rows = jdbc.queryForList(
-            "SELECT od_developer_key, od_customer_key FROM opendental_ai_config WHERE id = 1"
-        );
-        if (rows.isEmpty()) { deny(session, "not_onboarded"); return; }
-        String odDev = (String) rows.get(0).get("od_developer_key");
-        String odCust = (String) rows.get(0).get("od_customer_key");
+        // All credentials now flow through the centralized resolvers (tenant_credentials).
+        OpenDentalKeyResolver.Keys odKeys = opendentalKeyResolver.resolveForDb(rec.dbName());
+        if (!odKeys.isComplete()) { deny(session, "opendental_keys_missing"); return; }
+        String odDev = odKeys.developerKey();
+        String odCust = odKeys.customerKey();
         String geminiKey = geminiKeyResolver.resolveForDb(rec.dbName()).apiKey();
         if (geminiKey == null || geminiKey.isBlank()) { deny(session, "gemini_key_missing"); return; }
+        // Open a JdbcTemplate against the tenant DB for the per-call session-log writes below.
+        JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(rec.dbName()));
 
         sessions.put(session.getId(), new Session(slug, rec.dbName(), odDev, odCust));
         session.getAttributes().put("tenant_slug", slug);

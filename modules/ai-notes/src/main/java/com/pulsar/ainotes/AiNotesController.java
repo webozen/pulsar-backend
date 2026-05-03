@@ -1,11 +1,10 @@
 package com.pulsar.ainotes;
 
 import com.pulsar.ainotes.plaud.*;
+import com.pulsar.kernel.credentials.PlaudKeyResolver;
 import com.pulsar.kernel.security.RequireModule;
 import com.pulsar.kernel.tenant.TenantContext;
-import com.pulsar.kernel.tenant.TenantDataSources;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -17,12 +16,12 @@ import java.util.List;
 @RequireModule("ai-notes")
 public class AiNotesController {
 
-    private final TenantDataSources tenantDs;
     private final PlaudService plaud;
+    private final PlaudKeyResolver plaudKeyResolver;
 
-    public AiNotesController(TenantDataSources tenantDs, PlaudService plaud) {
-        this.tenantDs = tenantDs;
+    public AiNotesController(PlaudService plaud, PlaudKeyResolver plaudKeyResolver) {
         this.plaud = plaud;
+        this.plaudKeyResolver = plaudKeyResolver;
     }
 
     @GetMapping("/recordings")
@@ -54,11 +53,11 @@ public class AiNotesController {
     }
 
     private String token() {
-        JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(TenantContext.require().dbName()));
-        return jdbc.queryForList("SELECT plaud_token FROM ai_notes_config WHERE id = 1")
-            .stream().findFirst()
-            .map(row -> (String) row.get("plaud_token"))
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.PRECONDITION_FAILED,
-                "Plaud token not configured — complete onboarding first"));
+        String t = plaudKeyResolver.resolveForDb(TenantContext.require().dbName());
+        if (t == null || t.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED,
+                "Plaud token not configured — set it in workspace Settings");
+        }
+        return t;
     }
 }

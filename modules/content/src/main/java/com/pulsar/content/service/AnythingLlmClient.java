@@ -18,21 +18,34 @@ import java.util.Map;
 public class AnythingLlmClient {
     private static final Logger log = LoggerFactory.getLogger(AnythingLlmClient.class);
 
-    private final String baseUrl;
-    private final String apiKey;
+    private final com.pulsar.kernel.platform.PlatformSettingsService platformSettings;
+    private final String baseUrlEnvFallback;
+    private final String apiKeyEnvFallback;
     private final RestTemplate rest = new RestTemplate();
     private final ObjectMapper mapper = new ObjectMapper();
 
     public AnythingLlmClient(
+        com.pulsar.kernel.platform.PlatformSettingsService platformSettings,
         @Value("${pulsar.anythingllm.url:http://localhost:3001}") String baseUrl,
         @Value("${pulsar.anythingllm.api-key:}") String apiKey
     ) {
-        this.baseUrl = baseUrl;
-        this.apiKey = apiKey;
+        this.platformSettings = platformSettings;
+        this.baseUrlEnvFallback = baseUrl;
+        this.apiKeyEnvFallback = apiKey;
+    }
+
+    /** Resolve from platform_settings → env fallback. Per-call (no cache) so admin
+     *  rotations land immediately. */
+    private String baseUrl() {
+        return platformSettings.resolveOrFallback("anythingllm.url", baseUrlEnvFallback);
+    }
+    private String apiKey() {
+        return platformSettings.resolveOrFallback("anythingllm.api_key", apiKeyEnvFallback);
     }
 
     public boolean isConfigured() {
-        return apiKey != null && !apiKey.isBlank();
+        String k = apiKey();
+        return k != null && !k.isBlank();
     }
 
     public String getOrCreateWorkspace(String tenantSlug) {
@@ -40,7 +53,7 @@ public class AnythingLlmClient {
         try {
             HttpEntity<Void> req = new HttpEntity<>(authHeaders());
             ResponseEntity<Map> resp = rest.exchange(
-                baseUrl + "/api/v1/workspace/" + tenantSlug,
+                baseUrl() + "/api/v1/workspace/" + tenantSlug,
                 HttpMethod.GET, req, Map.class
             );
             // AnythingLLM returns 200 with `{"workspace":[]}` (empty array) when
@@ -57,7 +70,7 @@ public class AnythingLlmClient {
             HttpEntity<Map<String, String>> req = new HttpEntity<>(
                 Map.of("name", tenantSlug), authHeaders()
             );
-            rest.postForEntity(baseUrl + "/api/v1/workspace/new", req, Map.class);
+            rest.postForEntity(baseUrl() + "/api/v1/workspace/new", req, Map.class);
             log.info("Created AnythingLLM workspace for tenant: {}", tenantSlug);
         } catch (Exception e) {
             log.warn("Failed to create AnythingLLM workspace for {}: {}", tenantSlug, e.getMessage());
@@ -75,7 +88,7 @@ public class AnythingLlmClient {
             );
             HttpEntity<Map<String, Object>> req = new HttpEntity<>(body, authHeaders());
             ResponseEntity<Map> resp = rest.postForEntity(
-                baseUrl + "/api/v1/document/raw-text", req, Map.class
+                baseUrl() + "/api/v1/document/raw-text", req, Map.class
             );
             @SuppressWarnings("unchecked")
             Map<String, Object> doc = (Map<String, Object>) resp.getBody().get("document");
@@ -102,7 +115,7 @@ public class AnythingLlmClient {
             fileHeaders.setContentType(MediaType.parseMediaType(contentType));
             body.add("file", new HttpEntity<>(resource, fileHeaders));
             ResponseEntity<Map> resp = rest.postForEntity(
-                baseUrl + "/api/v1/document/upload",
+                baseUrl() + "/api/v1/document/upload",
                 new HttpEntity<>(body, headers), Map.class
             );
             @SuppressWarnings("unchecked")
@@ -121,7 +134,7 @@ public class AnythingLlmClient {
         try {
             Map<String, Object> body = Map.of("adds", List.of(), "deletes", List.of(docLocation));
             rest.exchange(
-                baseUrl + "/api/v1/workspace/" + tenantSlug + "/update-embeddings",
+                baseUrl() + "/api/v1/workspace/" + tenantSlug + "/update-embeddings",
                 HttpMethod.POST, new HttpEntity<>(body, authHeaders()), Map.class
             );
         } catch (Exception e) {
@@ -136,7 +149,7 @@ public class AnythingLlmClient {
             Map<String, String> body = Map.of("message", message, "mode", "chat");
             HttpEntity<Map<String, String>> req = new HttpEntity<>(body, authHeaders());
             ResponseEntity<Map> resp = rest.postForEntity(
-                baseUrl + "/api/v1/workspace/" + tenantSlug + "/chat",
+                baseUrl() + "/api/v1/workspace/" + tenantSlug + "/chat",
                 req, Map.class
             );
             return (String) resp.getBody().get("textResponse");
@@ -150,7 +163,7 @@ public class AnythingLlmClient {
         try {
             Map<String, Object> body = Map.of("adds", locations, "deletes", List.of());
             rest.exchange(
-                baseUrl + "/api/v1/workspace/" + tenantSlug + "/update-embeddings",
+                baseUrl() + "/api/v1/workspace/" + tenantSlug + "/update-embeddings",
                 HttpMethod.POST, new HttpEntity<>(body, authHeaders()), Map.class
             );
         } catch (Exception e) {
@@ -160,7 +173,7 @@ public class AnythingLlmClient {
 
     private HttpHeaders authHeaders() {
         HttpHeaders h = new HttpHeaders();
-        h.setBearerAuth(apiKey);
+        h.setBearerAuth(apiKey());
         h.setContentType(MediaType.APPLICATION_JSON);
         return h;
     }
