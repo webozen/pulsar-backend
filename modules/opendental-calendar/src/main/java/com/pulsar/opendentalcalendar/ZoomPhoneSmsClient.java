@@ -57,8 +57,8 @@ public class ZoomPhoneSmsClient {
         String accessToken = fetchAccessToken(accountId, clientId, clientSecret);
 
         Map<String, Object> payload = Map.of(
-                "from", Map.of("phone_number", fromNumber),
-                "to", List.of(Map.of("phone_number", toNumber)),
+                "from_phone_number", fromNumber,
+                "to_members", List.of(Map.of("phone_number", toNumber)),
                 "message", body
         );
 
