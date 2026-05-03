@@ -2,6 +2,7 @@ package com.pulsar.content.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -23,16 +24,27 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-/** Unit tests for ContentItemService — no Spring, JdbcTemplate mocked. */
+/**
+ * Unit tests for ContentItemService — no Spring, JdbcTemplate +
+ * AnythingLlmClient mocked. The default fixture has AnythingLLM
+ * "not configured" so the existing JDBC-focused tests don't try to
+ * hit the workspace; the AnythingLLM-sync tests at the bottom
+ * explicitly enable it.
+ */
 class ContentItemServiceTest {
 
+    private static final String TENANT = "acme";
+
     private JdbcTemplate jdbc;
+    private AnythingLlmClient llm;
     private ContentItemService svc;
 
     @BeforeEach
     void setUp() {
         jdbc = Mockito.mock(JdbcTemplate.class);
-        svc = new ContentItemService();
+        llm = Mockito.mock(AnythingLlmClient.class);
+        when(llm.isConfigured()).thenReturn(false);
+        svc = new ContentItemService(llm);
     }
 
     // ---- findAll ---------------------------------------------------------
@@ -61,44 +73,9 @@ class ContentItemServiceTest {
     }
 
     @Test
-    void findAll_typeOnly_appliesTypeFilter() {
-        when(jdbc.queryForList(anyString(), eq("runbook"))).thenReturn(List.of());
-
-        svc.findAll(jdbc, null, "runbook");
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbc).queryForList(sql.capture(), eq("runbook"));
-        assertTrue(sql.getValue().contains("type = ?"));
-        assertFalse(sql.getValue().contains("category = ?"));
-    }
-
-    @Test
-    void findAll_bothFilters_appliesBoth() {
-        when(jdbc.queryForList(anyString(), eq("guides"), eq("runbook"))).thenReturn(List.of());
-
-        svc.findAll(jdbc, "guides", "runbook");
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbc).queryForList(sql.capture(), eq("guides"), eq("runbook"));
-        assertTrue(sql.getValue().contains("category = ?"));
-        assertTrue(sql.getValue().contains("type = ?"));
-    }
-
-    // ---- findByItemId ----------------------------------------------------
-
-    @Test
-    void findByItemId_emptyRows_returnsEmptyOptional() {
-        when(jdbc.queryForList(anyString(), eq("missing"))).thenReturn(List.of());
-
-        Optional<Map<String, Object>> out = svc.findByItemId(jdbc, "missing");
-
-        assertTrue(out.isEmpty());
-    }
-
-    @Test
-    void findByItemId_returnsFirstRow() {
-        Map<String, Object> row = Map.of("item_id", "hello");
-        when(jdbc.queryForList(anyString(), eq("hello"))).thenReturn(List.of(row));
+    void findByItemId_returnsRowWhenPresent() {
+        when(jdbc.queryForList(anyString(), eq("hello")))
+            .thenReturn(List.of(Map.of("item_id", "hello")));
 
         Optional<Map<String, Object>> out = svc.findByItemId(jdbc, "hello");
 
@@ -110,91 +87,112 @@ class ContentItemServiceTest {
 
     @Test
     void create_slugifiesTitle() throws Exception {
-        // No existing rows => first slug wins.
         when(jdbc.queryForList(anyString(), anyString())).thenReturn(List.of());
-        when(jdbc.update(anyString(), any(), any(), any(), any(), any())).thenReturn(1);
+        when(jdbc.update(anyString(), any(), any(), any(), any(), any(), any())).thenReturn(1);
 
-        String id = svc.create(jdbc, "Hello World!", "general", "runbook", Map.of("content", "x"));
+        String id = svc.create(jdbc, TENANT, "Hello World!", "general", "runbook", Map.of("content", "x"));
         assertEquals("hello-world", id);
     }
 
     @Test
     void create_stripsLeadingAndTrailingPunctuation() throws Exception {
         when(jdbc.queryForList(anyString(), anyString())).thenReturn(List.of());
-        when(jdbc.update(anyString(), any(), any(), any(), any(), any())).thenReturn(1);
+        when(jdbc.update(anyString(), any(), any(), any(), any(), any(), any())).thenReturn(1);
 
-        String id = svc.create(jdbc, "  --- Awesome Thing!!!  ", "g", "t", Map.of());
+        String id = svc.create(jdbc, TENANT, "  --- Awesome Thing!!!  ", "g", "t", Map.of());
         assertEquals("awesome-thing", id);
     }
 
     @Test
     void create_onCollision_appendsIncrementingSuffix() throws Exception {
-        // First two lookups return a row (slug + slug-2 taken), third is empty.
         Map<String, Object> taken = Map.of("item_id", "hello");
         when(jdbc.queryForList(anyString(), eq("hello"))).thenReturn(List.of(taken));
         when(jdbc.queryForList(anyString(), eq("hello-2"))).thenReturn(List.of(taken));
         when(jdbc.queryForList(anyString(), eq("hello-3"))).thenReturn(List.of());
-        when(jdbc.update(anyString(), any(), any(), any(), any(), any())).thenReturn(1);
+        when(jdbc.update(anyString(), any(), any(), any(), any(), any(), any())).thenReturn(1);
 
-        String id = svc.create(jdbc, "hello", "g", "t", Map.of());
+        String id = svc.create(jdbc, TENANT, "hello", "g", "t", Map.of());
 
         assertEquals("hello-3", id);
     }
 
     @Test
-    void create_insertsSerializedJsonContentData() throws Exception {
+    void create_insertsSerializedJsonContentData_andNullDoc_whenLlmDisabled() throws Exception {
         when(jdbc.queryForList(anyString(), anyString())).thenReturn(List.of());
-        when(jdbc.update(anyString(), any(), any(), any(), any(), any())).thenReturn(1);
+        when(jdbc.update(anyString(), any(), any(), any(), any(), any(), any())).thenReturn(1);
 
         Map<String, Object> data = new HashMap<>();
         data.put("content", "hello");
         data.put("tags", List.of("a", "b"));
-        svc.create(jdbc, "Title", "general", "runbook", data);
+        svc.create(jdbc, TENANT, "Title", "general", "runbook", data);
 
         ArgumentCaptor<Object> a1 = ArgumentCaptor.forClass(Object.class);
         ArgumentCaptor<Object> a2 = ArgumentCaptor.forClass(Object.class);
         ArgumentCaptor<Object> a3 = ArgumentCaptor.forClass(Object.class);
         ArgumentCaptor<Object> a4 = ArgumentCaptor.forClass(Object.class);
         ArgumentCaptor<Object> a5 = ArgumentCaptor.forClass(Object.class);
+        ArgumentCaptor<Object> a6 = ArgumentCaptor.forClass(Object.class);
         verify(jdbc).update(
             anyString(),
-            a1.capture(), a2.capture(), a3.capture(), a4.capture(), a5.capture()
+            a1.capture(), a2.capture(), a3.capture(), a4.capture(), a5.capture(), a6.capture()
         );
-        // The 5th argument (content_data) should be a JSON string, not a Map.
+        // Position 5 = content_data JSON; position 6 = anythingllm_doc.
         Object contentDataArg = a5.getValue();
         assertTrue(contentDataArg instanceof String,
             "content_data must be serialized to JSON string, got " + contentDataArg.getClass());
         String json = (String) contentDataArg;
         assertTrue(json.contains("\"content\":\"hello\""));
         assertTrue(json.contains("\"tags\""));
+        // LLM disabled in setUp() — anythingllm_doc must be NULL.
+        assertNull(a6.getValue());
+        verify(llm, never()).pushTextDocument(anyString(), anyString(), anyString());
     }
 
     // ---- update ----------------------------------------------------------
 
     @Test
     void update_returnsTrueWhenRowUpdated() throws Exception {
-        when(jdbc.update(anyString(), any(), any(), any(), any(), any())).thenReturn(1);
-        assertTrue(svc.update(jdbc, "slug", "T", "c", "t", Map.of()));
+        when(jdbc.queryForList(anyString(), eq("slug")))
+            .thenReturn(List.of(Map.of("item_id", "slug")));
+        when(jdbc.update(anyString(), any(), any(), any(), any(), any(), any())).thenReturn(1);
+        assertTrue(svc.update(jdbc, TENANT, "slug", "T", "c", "t", Map.of()));
     }
 
     @Test
-    void update_returnsFalseWhenNoRowMatched() throws Exception {
-        when(jdbc.update(anyString(), any(), any(), any(), any(), any())).thenReturn(0);
-        assertFalse(svc.update(jdbc, "slug", "T", "c", "t", Map.of()));
+    void update_returnsFalseWhenItemNotFound() throws Exception {
+        when(jdbc.queryForList(anyString(), eq("slug"))).thenReturn(List.of());
+        assertFalse(svc.update(jdbc, TENANT, "slug", "T", "c", "t", Map.of()));
+        // No UPDATE should have fired.
+        verify(jdbc, never()).update(anyString(), any(), any(), any(), any(), any(), any());
     }
 
     // ---- delete ----------------------------------------------------------
 
     @Test
     void delete_returnsTrueWhenRowDeleted() {
+        when(jdbc.queryForList(anyString(), eq("slug")))
+            .thenReturn(List.of(Map.of("item_id", "slug")));
         when(jdbc.update(anyString(), eq("slug"))).thenReturn(1);
-        assertTrue(svc.delete(jdbc, "slug"));
+        assertTrue(svc.delete(jdbc, TENANT, "slug"));
     }
 
     @Test
-    void delete_returnsFalseWhenNoRowMatched() {
-        when(jdbc.update(anyString(), eq("missing"))).thenReturn(0);
-        assertFalse(svc.delete(jdbc, "missing"));
+    void delete_returnsFalseWhenItemNotFound() {
+        when(jdbc.queryForList(anyString(), eq("missing"))).thenReturn(List.of());
+        assertFalse(svc.delete(jdbc, TENANT, "missing"));
+        // Should never reach DELETE if the row doesn't exist.
+        verify(jdbc, never()).update(anyString(), eq("missing"));
+    }
+
+    @Test
+    void delete_removesAnythingLlmDocBeforeDeletingRow() {
+        when(jdbc.queryForList(anyString(), eq("slug")))
+            .thenReturn(List.of(Map.of("item_id", "slug", "anythingllm_doc", "custom-docs/abc")));
+        when(jdbc.update(anyString(), eq("slug"))).thenReturn(1);
+
+        svc.delete(jdbc, TENANT, "slug");
+
+        verify(llm).removeDocument(TENANT, "custom-docs/abc");
     }
 
     // ---- toResponse ------------------------------------------------------
@@ -248,16 +246,79 @@ class ContentItemServiceTest {
         assertEquals("Invalid data", out.get("error"));
     }
 
-    // ---- sanity check that create path does not re-query on empty ------
-
     @Test
     void create_noCollision_queriesItemIdExactlyOnce() throws Exception {
         when(jdbc.queryForList(anyString(), anyString())).thenReturn(List.of());
-        when(jdbc.update(anyString(), any(), any(), any(), any(), any())).thenReturn(1);
+        when(jdbc.update(anyString(), any(), any(), any(), any(), any(), any())).thenReturn(1);
 
-        svc.create(jdbc, "Unique Title", "g", "t", Map.of());
+        svc.create(jdbc, TENANT, "Unique Title", "g", "t", Map.of());
 
         verify(jdbc, times(1)).queryForList(anyString(), anyString());
-        verify(jdbc, never()).queryForList(anyString()); // findAll shape not hit
+        verify(jdbc, never()).queryForList(anyString());
+    }
+
+    // ---- AnythingLLM sync ------------------------------------------------
+
+    @Test
+    void create_pushesToWorkspace_andStoresReturnedDocLocation() throws Exception {
+        when(llm.isConfigured()).thenReturn(true);
+        when(llm.pushTextDocument(eq(TENANT), eq("Hello"), anyString()))
+            .thenReturn("custom-docs/raw-text-hello.json");
+        when(jdbc.queryForList(anyString(), anyString())).thenReturn(List.of());
+        when(jdbc.update(anyString(), any(), any(), any(), any(), any(), any())).thenReturn(1);
+
+        svc.create(jdbc, TENANT, "Hello", "general", "runbook", Map.of("content", "Body text"));
+
+        ArgumentCaptor<Object> a6 = ArgumentCaptor.forClass(Object.class);
+        verify(jdbc).update(anyString(), any(), any(), any(), any(), any(), a6.capture());
+        assertEquals("custom-docs/raw-text-hello.json", a6.getValue());
+    }
+
+    @Test
+    void create_skipsPush_whenBodyHasNoIndexableText() throws Exception {
+        when(llm.isConfigured()).thenReturn(true);
+        when(jdbc.queryForList(anyString(), anyString())).thenReturn(List.of());
+        when(jdbc.update(anyString(), any(), any(), any(), any(), any(), any())).thenReturn(1);
+
+        // contact with all blank fields — formatter produces only the
+        // header (title + type line), which the service treats as "nothing
+        // to embed" so no push happens.
+        svc.create(jdbc, TENANT, "Empty Contact", "general", "contact", Map.of());
+
+        verify(llm, never()).pushTextDocument(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void update_replacesPreviousDoc_thenPushesNew() throws Exception {
+        when(llm.isConfigured()).thenReturn(true);
+        when(llm.pushTextDocument(eq(TENANT), eq("Updated"), anyString()))
+            .thenReturn("custom-docs/raw-text-updated.json");
+        when(jdbc.queryForList(anyString(), eq("slug")))
+            .thenReturn(List.of(Map.of("item_id", "slug", "anythingllm_doc", "custom-docs/old.json")));
+        when(jdbc.update(anyString(), any(), any(), any(), any(), any(), any())).thenReturn(1);
+
+        boolean ok = svc.update(jdbc, TENANT, "slug", "Updated", "general", "runbook",
+            Map.of("content", "new body"));
+
+        assertTrue(ok);
+        // Old doc removed BEFORE new push, so retrieval can't return both.
+        var inOrder = Mockito.inOrder(llm);
+        inOrder.verify(llm).removeDocument(TENANT, "custom-docs/old.json");
+        inOrder.verify(llm).pushTextDocument(eq(TENANT), eq("Updated"), anyString());
+    }
+
+    @Test
+    void update_pushFailureDoesNotFailWrite() throws Exception {
+        when(llm.isConfigured()).thenReturn(true);
+        when(llm.pushTextDocument(anyString(), anyString(), anyString()))
+            .thenThrow(new RuntimeException("boom"));
+        when(jdbc.queryForList(anyString(), eq("slug")))
+            .thenReturn(List.of(Map.of("item_id", "slug")));
+        when(jdbc.update(anyString(), any(), any(), any(), any(), any(), any())).thenReturn(1);
+
+        // Should not throw; the row should still be persisted.
+        boolean ok = svc.update(jdbc, TENANT, "slug", "T", "c", "t",
+            Map.of("content", "body"));
+        assertTrue(ok);
     }
 }

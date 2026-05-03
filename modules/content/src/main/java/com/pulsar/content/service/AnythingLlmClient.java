@@ -111,9 +111,15 @@ public class AnythingLlmClient {
             ResponseEntity<Map> resp = rest.postForEntity(
                 baseUrl() + "/api/v1/document/raw-text", req, Map.class
             );
+            // AnythingLLM's /document/raw-text returns the same shape as
+            // /document/upload: a `documents` array, NOT a singular `document`
+            // key. The previous code read `.document` and silently received
+            // null on every push, so embedDocuments() never ran and chat
+            // couldn't see anything pushed via this path. Items + uploaded
+            // files both rely on this for the embed step.
             @SuppressWarnings("unchecked")
-            Map<String, Object> doc = (Map<String, Object>) resp.getBody().get("document");
-            String location = doc != null ? (String) doc.get("location") : null;
+            List<Map<String, Object>> docs = (List<Map<String, Object>>) resp.getBody().get("documents");
+            String location = (docs != null && !docs.isEmpty()) ? (String) docs.get(0).get("location") : null;
             if (location != null) embedDocuments(tenantSlug, List.of(location));
             return location;
         } catch (Exception e) {

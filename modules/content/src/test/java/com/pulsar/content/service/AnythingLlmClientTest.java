@@ -165,10 +165,14 @@ class AnythingLlmClientTest {
             .andExpect(method(HttpMethod.GET))
             .andRespond(withSuccess("{\"workspace\":{\"slug\":\"acme\"}}", MediaType.APPLICATION_JSON));
 
+        // Real AnythingLLM responds with a `documents` ARRAY, not a singular
+        // `document` key — verified against /api/v1/document/raw-text on
+        // v1.6.x. The old test had the wrong shape and the old client code
+        // had a matching wrong parser; both fixed together.
         server.expect(requestTo(BASE + "/api/v1/document/raw-text"))
             .andExpect(method(HttpMethod.POST))
             .andRespond(withSuccess(
-                "{\"document\":{\"location\":\"custom-documents/foo.json\"}}",
+                "{\"documents\":[{\"location\":\"custom-documents/foo.json\"}]}",
                 MediaType.APPLICATION_JSON));
 
         server.expect(requestTo(BASE + "/api/v1/workspace/acme/update-embeddings"))
