@@ -267,8 +267,9 @@ public class OpendentalCalendarController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Patient has opted out of text messages");
         }
 
-        // TRIAL MODE: always redirect to trial number regardless of patient phone.
-        String toNumber = "+15198002773";
+        // TRIAL MODE: redirect to provider-specific trial number.
+        String toNumber = "zoom-phone".equals(smsDispatcher.activeProvider(dbName))
+            ? "+14014510630" : "+15198002773";
 
         String template;
         String type = req.type();
@@ -369,10 +370,10 @@ public class OpendentalCalendarController {
         if (rawPhone == null || rawPhone.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No phone number on file");
         }
-        // TRIAL MODE: always redirect to trial number regardless of patient phone.
-        String toNumber = "+15198002773";
-
         String dbName = TenantContext.require().dbName();
+        // TRIAL MODE: redirect to provider-specific trial number.
+        String toNumber = "zoom-phone".equals(smsDispatcher.activeProvider(dbName))
+            ? "+14014510630" : "+15198002773";
         try {
             smsDispatcher.send(dbName, toNumber, req.body());
         } catch (SmsDispatcher.SmsNotConfiguredException e) {
