@@ -167,6 +167,60 @@ class Phase2ResolversTest {
         assertThat(r.statusForDb("any-db").hasToken()).isFalse();
     }
 
+    // ─── ZoomPhone ─────────────────────────────────────────────────────────
+
+    @Test
+    void zoomPhone_roundTrip() {
+        ZoomPhoneCredentialsResolver r = new ZoomPhoneCredentialsResolver(creds);
+        r.update("any-db", "acct-1", "cid-1", "csec-1", "+15550001111", null, "super_admin");
+
+        ZoomPhoneCredentialsResolver.Credentials c = r.resolveForDb("any-db");
+        assertThat(c.accountId()).isEqualTo("acct-1");
+        assertThat(c.clientId()).isEqualTo("cid-1");
+        assertThat(c.clientSecret()).isEqualTo("csec-1");
+        assertThat(c.fromNumber()).isEqualTo("+15550001111");
+        assertThat(c.isComplete()).isTrue();
+    }
+
+    @Test
+    void zoomPhone_status_partial() {
+        ZoomPhoneCredentialsResolver r = new ZoomPhoneCredentialsResolver(creds);
+        r.update("any-db", "acct-1", null, null, null, null, "super_admin");
+
+        ZoomPhoneCredentialsResolver.Status s = r.statusForDb("any-db");
+        assertThat(s.hasAccountId()).isTrue();
+        assertThat(s.hasClientId()).isFalse();
+        assertThat(s.hasClientSecret()).isFalse();
+        assertThat(s.hasFromNumber()).isFalse();
+        assertThat(s.isComplete()).isFalse();
+    }
+
+    @Test
+    void zoomPhone_clearAll_wipesAllFields() {
+        ZoomPhoneCredentialsResolver r = new ZoomPhoneCredentialsResolver(creds);
+        r.update("any-db", "acct-1", "cid-1", "csec-1", "+15550001111", null, "super_admin");
+        assertThat(r.statusForDb("any-db").isComplete()).isTrue();
+
+        r.clearAll("any-db", null, "super_admin");
+
+        ZoomPhoneCredentialsResolver.Status s = r.statusForDb("any-db");
+        assertThat(s.hasAccountId()).isFalse();
+        assertThat(s.hasClientId()).isFalse();
+        assertThat(s.hasClientSecret()).isFalse();
+        assertThat(s.hasFromNumber()).isFalse();
+    }
+
+    @Test
+    void zoomPhone_blankClientSecret_leavesExisting() {
+        ZoomPhoneCredentialsResolver r = new ZoomPhoneCredentialsResolver(creds);
+        r.update("any-db", "acct-1", "cid-1", "original-secret", "+15550001111", null, "super_admin");
+        // Re-update with blank clientSecret — original should survive.
+        r.update("any-db", "acct-2", "cid-2", "", "+15550002222", null, "super_admin");
+
+        ZoomPhoneCredentialsResolver.Credentials c = r.resolveForDb("any-db");
+        assertThat(c.clientSecret()).isEqualTo("original-secret");
+    }
+
     private static class SingleConnDataSource implements DataSource {
         private final String jdbc;
         SingleConnDataSource(String jdbc) { this.jdbc = jdbc; }
