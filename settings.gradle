@@ -18,7 +18,6 @@ include ':modules:text-copilot'      // generic — live SMS reply suggestions
 
 // Domain-specific modules — compiled into the jar only when the matching
 // -Pdomain=<name> profile is passed to bootJar (see host-app/build.gradle).
-include ':modules:opendental'     // dental
 include ':modules:opendental-ai'  // dental
 include ':modules:opendental-calendar'  // dental
 include ':modules:caller-match'   // dental

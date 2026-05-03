@@ -33,7 +33,6 @@ def domainModules = [
         ':modules:text-support',      // SMS inbox wrapper (text-intel + text-copilot)
     ],
     dental: [
-        ':modules:opendental',
         ':modules:opendental-ai',
         ':modules:opendental-calendar',
         ':modules:caller-match',
