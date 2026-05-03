@@ -3,6 +3,7 @@ package com.pulsar.copilot.ws;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pulsar.kernel.auth.JwtService;
+import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import com.pulsar.kernel.tenant.TenantDataSources;
 import com.pulsar.kernel.tenant.TenantRepository;
 import com.pulsar.opendentalai.opendental.OpendentalQueryClient;
@@ -70,6 +71,7 @@ public class CoPilotHandler extends TextWebSocketHandler {
     private final TenantRepository tenantRepo;
     private final TenantDataSources tenantDs;
     private final OpendentalQueryClient odClient;
+    private final GeminiKeyResolver geminiKeyResolver;
     private final ObjectMapper mapper = new ObjectMapper();
     private final OkHttpClient okClient = new OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS).build();
@@ -83,11 +85,12 @@ public class CoPilotHandler extends TextWebSocketHandler {
     private record Session(String tenantSlug, String tenantDbName, String odDeveloperKey, String odCustomerKey) {}
 
     public CoPilotHandler(JwtService jwt, TenantRepository tenantRepo, TenantDataSources tenantDs,
-                          OpendentalQueryClient odClient) {
+                          OpendentalQueryClient odClient, GeminiKeyResolver geminiKeyResolver) {
         this.jwt = jwt;
         this.tenantRepo = tenantRepo;
         this.tenantDs = tenantDs;
         this.odClient = odClient;
+        this.geminiKeyResolver = geminiKeyResolver;
     }
 
     @Override
@@ -147,12 +150,13 @@ public class CoPilotHandler extends TextWebSocketHandler {
 
         JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(rec.dbName()));
         var rows = jdbc.queryForList(
-            "SELECT gemini_key, od_developer_key, od_customer_key FROM opendental_ai_config WHERE id = 1"
+            "SELECT od_developer_key, od_customer_key FROM opendental_ai_config WHERE id = 1"
         );
         if (rows.isEmpty()) { deny(session, "not_onboarded"); return; }
-        String geminiKey = (String) rows.get(0).get("gemini_key");
         String odDev = (String) rows.get(0).get("od_developer_key");
         String odCust = (String) rows.get(0).get("od_customer_key");
+        String geminiKey = geminiKeyResolver.resolveForDb(rec.dbName()).apiKey();
+        if (geminiKey == null || geminiKey.isBlank()) { deny(session, "gemini_key_missing"); return; }
 
         sessions.put(session.getId(), new Session(slug, rec.dbName(), odDev, odCust));
         session.getAttributes().put("tenant_slug", slug);

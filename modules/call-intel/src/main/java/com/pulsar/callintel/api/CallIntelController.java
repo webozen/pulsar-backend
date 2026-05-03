@@ -6,6 +6,7 @@ import com.pulsar.callintel.services.GeminiSummarizer;
 import com.pulsar.callintel.services.GeminiSummarizer.Summary;
 import com.pulsar.kernel.security.RequireModule;
 import com.pulsar.kernel.tenant.TenantContext;
+import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import com.pulsar.kernel.tenant.TenantDataSources;
 import com.pulsar.kernel.voice.CallEndedEvent;
 import com.pulsar.kernel.voice.RecordingFetcher;
@@ -51,16 +52,19 @@ public class CallIntelController {
     private final GeminiSummarizer summarizer;
     private final Map<String, RecordingFetcher> recordingFetchersById;
     private final ObjectMapper mapper = new ObjectMapper();
+    private final GeminiKeyResolver geminiKeyResolver;
 
     public CallIntelController(
         TenantDataSources tenantDs,
         GeminiSummarizer summarizer,
-        List<RecordingFetcher> recordingFetchers
+        List<RecordingFetcher> recordingFetchers,
+        GeminiKeyResolver geminiKeyResolver
     ) {
         this.tenantDs = tenantDs;
         this.summarizer = summarizer;
         this.recordingFetchersById = recordingFetchers.stream()
             .collect(Collectors.toMap(RecordingFetcher::id, f -> f));
+        this.geminiKeyResolver = geminiKeyResolver;
     }
 
     public record ProcessRequest(
@@ -141,11 +145,8 @@ public class CallIntelController {
 
     private java.util.Optional<String> readGeminiKey() {
         var t = TenantContext.require();
-        var rows = new JdbcTemplate(tenantDs.forDb(t.dbName())).queryForList(
-            "SELECT gemini_key FROM opendental_ai_config WHERE id = 1"
-        );
-        if (rows.isEmpty()) return java.util.Optional.empty();
-        return java.util.Optional.ofNullable((String) rows.get(0).get("gemini_key"));
+        String key = geminiKeyResolver.resolveForDb(t.dbName()).apiKey();
+        return key == null || key.isBlank() ? java.util.Optional.empty() : java.util.Optional.of(key);
     }
 
     /** Try the kernel adapter first; fall back to the dev-friendly raw fetch

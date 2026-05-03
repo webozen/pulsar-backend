@@ -2,6 +2,7 @@ package com.pulsar.textcopilot.api;
 
 import com.pulsar.kernel.security.RequireModule;
 import com.pulsar.kernel.tenant.TenantContext;
+import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import com.pulsar.kernel.tenant.TenantDataSources;
 import com.pulsar.kernel.text.TextEvent;
 import com.pulsar.kernel.text.TextProvider;
@@ -43,13 +44,16 @@ public class TextCopilotController {
     private final TextProviderRegistry registry;
     private final TextThreadStore store;
     private final ReplySuggester suggester;
+    private final GeminiKeyResolver geminiKeyResolver;
 
     public TextCopilotController(TenantDataSources tenantDs, TextProviderRegistry registry,
-                                 TextThreadStore store, ReplySuggester suggester) {
+                                 TextThreadStore store, ReplySuggester suggester,
+                                 GeminiKeyResolver geminiKeyResolver) {
         this.tenantDs = tenantDs;
         this.registry = registry;
         this.store = store;
         this.suggester = suggester;
+        this.geminiKeyResolver = geminiKeyResolver;
     }
 
     public record SuggestRequest(@NotNull Long threadId, String draft, Integer n) {}
@@ -122,10 +126,7 @@ public class TextCopilotController {
 
     private Optional<String> readGeminiKey() {
         var t = TenantContext.require();
-        var rows = new JdbcTemplate(tenantDs.forDb(t.dbName())).queryForList(
-            "SELECT gemini_key FROM opendental_ai_config WHERE id = 1"
-        );
-        if (rows.isEmpty()) return Optional.empty();
-        return Optional.ofNullable((String) rows.get(0).get("gemini_key"));
+        String key = geminiKeyResolver.resolveForDb(t.dbName()).apiKey();
+        return key == null || key.isBlank() ? Optional.empty() : Optional.of(key);
     }
 }

@@ -2,7 +2,7 @@ package com.pulsar.host.api.admin;
 
 import com.pulsar.kernel.tenant.TenantRecord;
 import com.pulsar.kernel.tenant.TenantRepository;
-import com.pulsar.translate.GeminiKeyResolver;
+import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;

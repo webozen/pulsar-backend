@@ -10,4 +10,9 @@ dependencies {
     runtimeOnly    'io.jsonwebtoken:jjwt-impl:0.12.6'
     runtimeOnly    'io.jsonwebtoken:jjwt-jackson:0.12.6'
     implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
+
+    // In-memory MySQL-compatible DB for fast unit tests of services that touch SQL
+    // (e.g. CredentialsService). Production runs against MySQL; H2 in MODE=MYSQL
+    // covers the SQL we use without requiring a live DB in CI.
+    testImplementation 'com.h2database:h2:2.2.224'
 }

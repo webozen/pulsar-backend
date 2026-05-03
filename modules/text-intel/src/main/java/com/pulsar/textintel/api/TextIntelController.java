@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pulsar.kernel.security.RequireModule;
 import com.pulsar.kernel.tenant.TenantContext;
+import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import com.pulsar.kernel.tenant.TenantDataSources;
 import com.pulsar.kernel.text.TextEvent;
 import com.pulsar.kernel.text.TextProviderRegistry;
@@ -40,13 +41,16 @@ public class TextIntelController {
     private final TextThreadStore store;
     private final TextSummarizer summarizer;
     private final ObjectMapper mapper = new ObjectMapper();
+    private final GeminiKeyResolver geminiKeyResolver;
 
     public TextIntelController(TenantDataSources tenantDs, TextProviderRegistry registry,
-                               TextThreadStore store, TextSummarizer summarizer) {
+                               TextThreadStore store, TextSummarizer summarizer,
+                               GeminiKeyResolver geminiKeyResolver) {
         this.tenantDs = tenantDs;
         this.registry = registry;
         this.store = store;
         this.summarizer = summarizer;
+        this.geminiKeyResolver = geminiKeyResolver;
     }
 
     /** Provider-neutral inbound webhook: /webhook/text/{providerId}. */
@@ -149,11 +153,8 @@ public class TextIntelController {
 
     private Optional<String> readGeminiKey() {
         var t = TenantContext.require();
-        var rows = new JdbcTemplate(tenantDs.forDb(t.dbName())).queryForList(
-            "SELECT gemini_key FROM opendental_ai_config WHERE id = 1"
-        );
-        if (rows.isEmpty()) return Optional.empty();
-        return Optional.ofNullable((String) rows.get(0).get("gemini_key"));
+        String key = geminiKeyResolver.resolveForDb(t.dbName()).apiKey();
+        return key == null || key.isBlank() ? Optional.empty() : Optional.of(key);
     }
 
     private void writeSummary(long threadId, List<Map<String, Object>> msgs, Summary s) {

@@ -2,6 +2,7 @@ package com.pulsar.opendentalai.chat;
 
 import com.pulsar.kernel.auth.Principal;
 import com.pulsar.kernel.auth.PrincipalContext;
+import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import com.pulsar.kernel.security.RequireModule;
 import com.pulsar.kernel.tenant.TenantContext;
 import com.pulsar.kernel.tenant.TenantDataSources;
@@ -48,17 +49,20 @@ public class OpendentalAiChatController {
     private final SchemaCatalog catalog;
     private final RunQueryTool runQueryTool;
     private final GeminiChatClient gemini;
+    private final GeminiKeyResolver geminiKeyResolver;
 
     public OpendentalAiChatController(
         TenantDataSources tenantDs,
         SchemaCatalog catalog,
         RunQueryTool runQueryTool,
-        GeminiChatClient gemini
+        GeminiChatClient gemini,
+        GeminiKeyResolver geminiKeyResolver
     ) {
         this.tenantDs = tenantDs;
         this.catalog = catalog;
         this.runQueryTool = runQueryTool;
         this.gemini = gemini;
+        this.geminiKeyResolver = geminiKeyResolver;
     }
 
     public record MessageDto(String role, String text) {}
@@ -79,15 +83,19 @@ public class OpendentalAiChatController {
         JdbcTemplate jdbc = new JdbcTemplate(ds);
 
         var rows = jdbc.queryForList(
-            "SELECT gemini_key, od_developer_key, od_customer_key, timezone FROM opendental_ai_config WHERE id = 1"
+            "SELECT od_developer_key, od_customer_key, timezone FROM opendental_ai_config WHERE id = 1"
         );
         if (rows.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "not_onboarded");
         }
-        String apiKey = (String) rows.get(0).get("gemini_key");
         String odDev  = (String) rows.get(0).get("od_developer_key");
         String odCust = (String) rows.get(0).get("od_customer_key");
         String tz     = rows.get(0).get("timezone") instanceof String s ? s : "America/New_York";
+        // Centralized resolver: tenant_credentials → legacy fallback (translate_config or opendental_ai_config) → platform default.
+        String apiKey = geminiKeyResolver.resolveForDb(tenant.dbName()).apiKey();
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FAILED_DEPENDENCY, "gemini_key_missing");
+        }
 
         String systemInstruction = SystemInstructions.build(catalog, tenant.slug(), tz);
 

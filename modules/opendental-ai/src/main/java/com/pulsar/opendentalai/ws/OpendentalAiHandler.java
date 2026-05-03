@@ -3,6 +3,7 @@ package com.pulsar.opendentalai.ws;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pulsar.kernel.auth.JwtService;
+import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import com.pulsar.kernel.tenant.TenantDataSources;
 import com.pulsar.kernel.tenant.TenantRepository;
 import com.pulsar.opendentalai.schema.SchemaCatalog;
@@ -57,6 +58,7 @@ public class OpendentalAiHandler extends TextWebSocketHandler {
     private final TenantDataSources tenantDs;
     private final SchemaCatalog catalog;
     private final RunQueryTool runQueryTool;
+    private final GeminiKeyResolver geminiKeyResolver;
     private final ObjectMapper mapper = new ObjectMapper();
     private final OkHttpClient okClient = new OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -79,12 +81,14 @@ public class OpendentalAiHandler extends TextWebSocketHandler {
     ) {}
 
     public OpendentalAiHandler(JwtService jwt, TenantRepository tenantRepo, TenantDataSources tenantDs,
-                               SchemaCatalog catalog, RunQueryTool runQueryTool) {
+                               SchemaCatalog catalog, RunQueryTool runQueryTool,
+                               GeminiKeyResolver geminiKeyResolver) {
         this.jwt = jwt;
         this.tenantRepo = tenantRepo;
         this.tenantDs = tenantDs;
         this.catalog = catalog;
         this.runQueryTool = runQueryTool;
+        this.geminiKeyResolver = geminiKeyResolver;
     }
 
     @Override
@@ -164,12 +168,15 @@ public class OpendentalAiHandler extends TextWebSocketHandler {
 
         JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(rec.dbName()));
         var rows = jdbc.queryForList(
-            "SELECT gemini_key, od_developer_key, od_customer_key FROM opendental_ai_config WHERE id = 1"
+            "SELECT od_developer_key, od_customer_key FROM opendental_ai_config WHERE id = 1"
         );
         if (rows.isEmpty()) { deny(session, "not_onboarded"); return; }
-        String geminiKey = (String) rows.get(0).get("gemini_key");
         String odDev     = (String) rows.get(0).get("od_developer_key");
         String odCust    = (String) rows.get(0).get("od_customer_key");
+        // Gemini key now flows through the centralized resolver (kernel CredentialsService);
+        // legacy fallback covers tenants who haven't re-saved via the new admin/tenant UI yet.
+        String geminiKey = geminiKeyResolver.resolveForDb(rec.dbName()).apiKey();
+        if (geminiKey == null || geminiKey.isBlank()) { deny(session, "gemini_key_missing"); return; }
 
         sessions.put(session.getId(), new Session(slug, email, odDev, odCust, rec.dbName()));
         session.getAttributes().put("tenant_slug", slug);
