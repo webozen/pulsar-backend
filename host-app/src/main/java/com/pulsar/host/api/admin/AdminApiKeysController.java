@@ -93,6 +93,17 @@ public class AdminApiKeysController {
         return buildStatusResponse(tenant.dbName());
     }
 
+    /** Wipe all three Twilio fields in one call. The PUT path can't clear
+     *  the auth token because blank-means-untouched there, so a destructive
+     *  "Clear all" lives on its own DELETE endpoint. */
+    @DeleteMapping("/twilio")
+    public Map<String, Object> clearTwilio(@PathVariable long id) {
+        AdminGuard.requireAdmin();
+        TenantRecord tenant = resolveTenant(id);
+        twilioResolver.clearAll(tenant.dbName(), null, "super_admin");
+        return buildStatusResponse(tenant.dbName());
+    }
+
     @PutMapping("/plaud")
     public Map<String, Object> updatePlaud(@PathVariable long id, @RequestBody PlaudKeyRequest req) {
         AdminGuard.requireAdmin();

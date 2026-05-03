@@ -131,6 +131,24 @@ class Phase2ResolversTest {
         assertThat(s.isComplete()).isFalse();
     }
 
+    @Test
+    void twilioClearAllWipesEveryField_includingAuthTokenWhichBlankPutCannotClear() {
+        // The PUT path treats blank authToken as "leave untouched" so it
+        // can't be used to wipe a key. clearAll exists specifically to
+        // bypass that — admin "Clear" button hits DELETE which calls this.
+        TwilioCredentialsResolver r = new TwilioCredentialsResolver(creds);
+        r.update("any-db", "AC1", "secret", "+15551110000", null, "super_admin");
+        TwilioCredentialsResolver.Status before = r.statusForDb("any-db");
+        assertThat(before.isComplete()).isTrue();
+
+        r.clearAll("any-db", null, "super_admin");
+
+        TwilioCredentialsResolver.Status after = r.statusForDb("any-db");
+        assertThat(after.hasAccountSid()).isFalse();
+        assertThat(after.hasAuthToken()).isFalse();
+        assertThat(after.hasFromNumber()).isFalse();
+    }
+
     // ─── Plaud ─────────────────────────────────────────────────────────────
 
     @Test

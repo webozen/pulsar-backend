@@ -81,4 +81,13 @@ public class TwilioCredentialsResolver {
         if (value.isBlank()) creds.clear(dbName, PROVIDER, keyName, email, role);
         else                 creds.set  (dbName, PROVIDER, keyName, value, email, role);
     }
+
+    /** Wipe all three Twilio credentials in one call. Used by the admin
+     *  "Clear" button — the per-field PUT path can't clear the auth token
+     *  because blank means "leave untouched" there. */
+    public void clearAll(String dbName, String actorEmail, String actorRole) {
+        creds.clear(dbName, PROVIDER, KEY_ACCOUNT_SID, actorEmail, actorRole);
+        creds.clear(dbName, PROVIDER, KEY_AUTH_TOKEN,  actorEmail, actorRole);
+        creds.clear(dbName, PROVIDER, KEY_FROM_NUMBER, actorEmail, actorRole);
+    }
 }

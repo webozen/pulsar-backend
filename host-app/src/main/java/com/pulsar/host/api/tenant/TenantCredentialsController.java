@@ -87,6 +87,14 @@ public class TenantCredentialsController {
         return buildStatusResponse(t.dbName());
     }
 
+    @DeleteMapping("/twilio")
+    public Map<String, Object> clearTwilio() {
+        var actor = requireTenantActor();
+        var t = TenantContext.require();
+        twilioResolver.clearAll(t.dbName(), actor.email(), actor.role());
+        return buildStatusResponse(t.dbName());
+    }
+
     @PutMapping("/plaud")
     public Map<String, Object> updatePlaud(@RequestBody PlaudKeyRequest req) {
         var actor = requireTenantActor();
