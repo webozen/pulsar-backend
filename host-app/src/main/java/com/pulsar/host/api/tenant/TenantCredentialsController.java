@@ -6,6 +6,7 @@ import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import com.pulsar.kernel.credentials.OpenDentalKeyResolver;
 import com.pulsar.kernel.credentials.PlaudKeyResolver;
 import com.pulsar.kernel.credentials.TwilioCredentialsResolver;
+import com.pulsar.kernel.credentials.ZoomPhoneCredentialsResolver;
 import com.pulsar.kernel.tenant.TenantContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -27,23 +28,27 @@ public class TenantCredentialsController {
     private final OpenDentalKeyResolver opendentalKeyResolver;
     private final TwilioCredentialsResolver twilioResolver;
     private final PlaudKeyResolver plaudResolver;
+    private final ZoomPhoneCredentialsResolver zoomPhoneResolver;
 
     public TenantCredentialsController(
         GeminiKeyResolver geminiKeyResolver,
         OpenDentalKeyResolver opendentalKeyResolver,
         TwilioCredentialsResolver twilioResolver,
-        PlaudKeyResolver plaudResolver
+        PlaudKeyResolver plaudResolver,
+        ZoomPhoneCredentialsResolver zoomPhoneResolver
     ) {
         this.geminiKeyResolver = geminiKeyResolver;
         this.opendentalKeyResolver = opendentalKeyResolver;
         this.twilioResolver = twilioResolver;
         this.plaudResolver = plaudResolver;
+        this.zoomPhoneResolver = zoomPhoneResolver;
     }
 
     public record GeminiKeyRequest(String apiKey, Boolean useDefault) {}
     public record OpenDentalKeysRequest(String developerKey, String customerKey) {}
     public record TwilioCredsRequest(String accountSid, String authToken, String fromNumber) {}
     public record PlaudKeyRequest(String bearerToken) {}
+    public record ZoomPhoneCredsRequest(String accountId, String clientId, String clientSecret, String fromNumber) {}
 
     @GetMapping
     public Map<String, Object> get() {
@@ -107,6 +112,29 @@ public class TenantCredentialsController {
         return buildStatusResponse(t.dbName());
     }
 
+    @PutMapping("/zoom-phone")
+    public Map<String, Object> updateZoomPhone(@RequestBody ZoomPhoneCredsRequest req) {
+        var actor = requireTenantActor();
+        var t = TenantContext.require();
+        zoomPhoneResolver.update(
+            t.dbName(),
+            req.accountId()    == null ? null : req.accountId().trim(),
+            req.clientId()     == null ? null : req.clientId().trim(),
+            req.clientSecret(),
+            req.fromNumber()   == null ? null : req.fromNumber().trim(),
+            actor.email(), actor.role()
+        );
+        return buildStatusResponse(t.dbName());
+    }
+
+    @DeleteMapping("/zoom-phone")
+    public Map<String, Object> clearZoomPhone() {
+        var actor = requireTenantActor();
+        var t = TenantContext.require();
+        zoomPhoneResolver.clearAll(t.dbName(), actor.email(), actor.role());
+        return buildStatusResponse(t.dbName());
+    }
+
     private Principal.TenantUser requireTenantActor() {
         Principal p = PrincipalContext.get();
         if (!(p instanceof Principal.TenantUser tu)) {
@@ -140,12 +168,20 @@ public class TenantCredentialsController {
         Map<String, Object> plaud = new LinkedHashMap<>();
         plaud.put("hasToken", plaudResolver.statusForDb(dbName).hasToken());
 
+        Map<String, Object> zoomPhone = new LinkedHashMap<>();
+        var zpStatus = zoomPhoneResolver.statusForDb(dbName);
+        zoomPhone.put("hasAccountId",    zpStatus.hasAccountId());
+        zoomPhone.put("hasClientId",     zpStatus.hasClientId());
+        zoomPhone.put("hasClientSecret", zpStatus.hasClientSecret());
+        zoomPhone.put("hasFromNumber",   zpStatus.hasFromNumber());
+
         Map<String, Object> resp = new LinkedHashMap<>();
         Map<String, Object> providers = new LinkedHashMap<>();
         providers.put("gemini", gemini);
         providers.put("opendental", opendental);
         providers.put("twilio", twilio);
         providers.put("plaud", plaud);
+        providers.put("zoom-phone", zoomPhone);
         resp.put("providers", providers);
         return resp;
     }
