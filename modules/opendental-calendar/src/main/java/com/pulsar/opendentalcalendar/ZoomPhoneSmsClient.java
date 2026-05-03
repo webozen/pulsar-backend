@@ -56,11 +56,14 @@ public class ZoomPhoneSmsClient {
                      String fromNumber, String toNumber, String body) throws IOException {
         String accessToken = fetchAccessToken(accountId, clientId, clientSecret);
 
-        Map<String, Object> payload = Map.of(
-                "from_phone_number", fromNumber,
-                "to_members", List.of(Map.of("phone_number", toNumber)),
-                "message", body
-        );
+        Map<String, Object> sender = new java.util.LinkedHashMap<>();
+        sender.put("user_id", "me");
+        sender.put("phone_number", fromNumber);
+
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("message", body);
+        payload.put("sender", sender);
+        payload.put("to_members", List.of(Map.of("phone_number", toNumber)));
 
         String json = mapper.writeValueAsString(payload);
 
