@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pulsar.kernel.auth.JwtService;
 import com.pulsar.kernel.credentials.GeminiKeyResolver;
+import com.pulsar.kernel.credentials.OpenDentalKeyResolver;
 import com.pulsar.kernel.tenant.TenantDataSources;
 import com.pulsar.kernel.tenant.TenantRepository;
 import com.pulsar.opendentalai.schema.SchemaCatalog;
@@ -59,6 +60,7 @@ public class OpendentalAiHandler extends TextWebSocketHandler {
     private final SchemaCatalog catalog;
     private final RunQueryTool runQueryTool;
     private final GeminiKeyResolver geminiKeyResolver;
+    private final OpenDentalKeyResolver opendentalKeyResolver;
     private final ObjectMapper mapper = new ObjectMapper();
     private final OkHttpClient okClient = new OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -82,13 +84,15 @@ public class OpendentalAiHandler extends TextWebSocketHandler {
 
     public OpendentalAiHandler(JwtService jwt, TenantRepository tenantRepo, TenantDataSources tenantDs,
                                SchemaCatalog catalog, RunQueryTool runQueryTool,
-                               GeminiKeyResolver geminiKeyResolver) {
+                               GeminiKeyResolver geminiKeyResolver,
+                               OpenDentalKeyResolver opendentalKeyResolver) {
         this.jwt = jwt;
         this.tenantRepo = tenantRepo;
         this.tenantDs = tenantDs;
         this.catalog = catalog;
         this.runQueryTool = runQueryTool;
         this.geminiKeyResolver = geminiKeyResolver;
+        this.opendentalKeyResolver = opendentalKeyResolver;
     }
 
     @Override
@@ -166,15 +170,11 @@ public class OpendentalAiHandler extends TextWebSocketHandler {
         if (rec == null) { deny(session, "tenant_not_found"); return; }
         if (!rec.activeModules().contains("opendental-ai")) { deny(session, "module_not_active"); return; }
 
-        JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(rec.dbName()));
-        var rows = jdbc.queryForList(
-            "SELECT od_developer_key, od_customer_key FROM opendental_ai_config WHERE id = 1"
-        );
-        if (rows.isEmpty()) { deny(session, "not_onboarded"); return; }
-        String odDev     = (String) rows.get(0).get("od_developer_key");
-        String odCust    = (String) rows.get(0).get("od_customer_key");
-        // Gemini key now flows through the centralized resolver (kernel CredentialsService);
-        // legacy fallback covers tenants who haven't re-saved via the new admin/tenant UI yet.
+        // All credentials now flow through the centralized resolvers (tenant_credentials).
+        OpenDentalKeyResolver.Keys odKeys = opendentalKeyResolver.resolveForDb(rec.dbName());
+        if (!odKeys.isComplete()) { deny(session, "opendental_keys_missing"); return; }
+        String odDev = odKeys.developerKey();
+        String odCust = odKeys.customerKey();
         String geminiKey = geminiKeyResolver.resolveForDb(rec.dbName()).apiKey();
         if (geminiKey == null || geminiKey.isBlank()) { deny(session, "gemini_key_missing"); return; }
 

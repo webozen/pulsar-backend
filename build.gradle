@@ -66,6 +66,14 @@ project(':kernel') {
                     minimum = 0.80
                 }
             }
+            rule {
+                element = 'PACKAGE'
+                includes = ['com.pulsar.kernel.platform']
+                limit {
+                    counter = 'LINE'
+                    minimum = 0.80
+                }
+            }
         }
     }
     check.dependsOn jacocoTestCoverageVerification
