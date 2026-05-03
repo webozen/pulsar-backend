@@ -3,6 +3,7 @@ package com.pulsar.content.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
@@ -24,6 +25,12 @@ public class AnythingLlmClient {
     private final RestTemplate rest = new RestTemplate();
     private final ObjectMapper mapper = new ObjectMapper();
 
+    // @Autowired is REQUIRED here — Spring auto-selects only when there's
+    // exactly one non-default constructor; this class has two (the 2-arg
+    // test-only ctor below), so without an explicit annotation Spring
+    // falls back to looking for a no-arg ctor and fails with
+    // "No default constructor found" at boot.
+    @Autowired
     public AnythingLlmClient(
         com.pulsar.kernel.platform.PlatformSettingsService platformSettings,
         @Value("${pulsar.anythingllm.url:http://localhost:3001}") String baseUrl,
