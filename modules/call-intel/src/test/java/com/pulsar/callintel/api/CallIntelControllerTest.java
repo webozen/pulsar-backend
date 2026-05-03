@@ -2,6 +2,7 @@ package com.pulsar.callintel.api;
 
 import com.pulsar.callintel.services.GeminiSummarizer;
 import com.pulsar.callintel.services.GeminiSummarizer.Summary;
+import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import com.pulsar.kernel.tenant.TenantContext;
 import com.pulsar.kernel.tenant.TenantDataSources;
 import com.pulsar.kernel.tenant.TenantInfo;
@@ -32,6 +33,7 @@ class CallIntelControllerTest {
     private TenantDataSources tenantDs;
     private GeminiSummarizer summarizer;
     private RecordingFetcher rcFetcher;
+    private GeminiKeyResolver geminiKeyResolver;
     private DataSource mockDs;
 
     // A minimal tenant bound to the thread-local for every test that hits TenantContext.require()
@@ -49,6 +51,11 @@ class CallIntelControllerTest {
         rcFetcher = mock(RecordingFetcher.class);
         when(rcFetcher.id()).thenReturn("ringcentral");
 
+        geminiKeyResolver = mock(GeminiKeyResolver.class);
+        // Default to "key configured" — individual tests can override.
+        when(geminiKeyResolver.resolveForDb(anyString()))
+            .thenReturn(new GeminiKeyResolver.Resolution("AIza-test", GeminiKeyResolver.Source.TENANT));
+
         when(tenantDs.forDb(anyString())).thenReturn(mockDs);
         TenantContext.set(TENANT);
     }
@@ -63,7 +70,7 @@ class CallIntelControllerTest {
     // ─────────────────────────────────────────────────────────────────────────
 
     private CallIntelController controller() {
-        return new CallIntelController(tenantDs, summarizer, List.of(rcFetcher));
+        return new CallIntelController(tenantDs, summarizer, List.of(rcFetcher), geminiKeyResolver);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -110,21 +117,22 @@ class CallIntelControllerTest {
 
     @Test
     void process_missing_gemini_key_returns_424() {
+        // Gemini key is now resolved via the centralized GeminiKeyResolver
+        // (Phase 1 of credential centralization). Override the BeforeEach
+        // default to simulate "no key configured".
+        when(geminiKeyResolver.resolveForDb(anyString()))
+            .thenReturn(new GeminiKeyResolver.Resolution(null, GeminiKeyResolver.Source.NONE));
+
         CallIntelController ctrl = controller();
         CallIntelController.ProcessRequest req = new CallIntelController.ProcessRequest(
             "ringcentral", null, null, null, null,
             null, null, null, null, "Hello transcript"
         );
 
-        try (MockedConstruction<JdbcTemplate> ignored =
-                 Mockito.mockConstruction(JdbcTemplate.class, (jdbc, ctx) ->
-                     when(jdbc.queryForList(anyString())).thenReturn(List.of()))) {
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+            () -> ctrl.process(req));
 
-            ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> ctrl.process(req));
-
-            assertEquals(HttpStatus.FAILED_DEPENDENCY, ex.getStatusCode());
-        }
+        assertEquals(HttpStatus.FAILED_DEPENDENCY, ex.getStatusCode());
     }
 
     @Test
@@ -136,6 +144,10 @@ class CallIntelControllerTest {
             "positive",
             "appointment"
         );
+        // Gemini key now flows via the resolver — override the default mock
+        // to return the value the summarizer expects.
+        when(geminiKeyResolver.resolveForDb(anyString()))
+            .thenReturn(new GeminiKeyResolver.Resolution("gemini-key-xyz", GeminiKeyResolver.Source.TENANT));
         when(summarizer.summarizeTranscript(eq("gemini-key-xyz"), anyString()))
             .thenReturn(fakeSummary);
 
@@ -147,9 +159,6 @@ class CallIntelControllerTest {
 
         try (MockedConstruction<JdbcTemplate> jdbcMock =
                  Mockito.mockConstruction(JdbcTemplate.class, (jdbc, ctx) -> {
-                     // gemini key lookup
-                     when(jdbc.queryForList(contains("gemini_key")))
-                         .thenReturn(List.of(Map.of("gemini_key", "gemini-key-xyz")));
                      // INSERT call_intel_entry
                      when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
                      // LAST_INSERT_ID()
@@ -178,6 +187,8 @@ class CallIntelControllerTest {
             "billing"
         );
         when(rcFetcher.fetch(eq("rec-123"), any(DataSource.class))).thenReturn(fakeAudio);
+        when(geminiKeyResolver.resolveForDb(anyString()))
+            .thenReturn(new GeminiKeyResolver.Resolution("gemini-key-xyz", GeminiKeyResolver.Source.TENANT));
         when(summarizer.summarizeAudio(eq("gemini-key-xyz"), eq(fakeAudio), anyString()))
             .thenReturn(fakeSummary);
 
@@ -189,8 +200,6 @@ class CallIntelControllerTest {
 
         try (MockedConstruction<JdbcTemplate> jdbcMock =
                  Mockito.mockConstruction(JdbcTemplate.class, (jdbc, ctx) -> {
-                     when(jdbc.queryForList(contains("gemini_key")))
-                         .thenReturn(List.of(Map.of("gemini_key", "gemini-key-xyz")));
                      when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
                      when(jdbc.queryForObject(anyString(), eq(Long.class))).thenReturn(7L);
                  })) {

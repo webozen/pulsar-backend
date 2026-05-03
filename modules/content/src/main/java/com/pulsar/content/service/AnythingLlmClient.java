@@ -34,13 +34,27 @@ public class AnythingLlmClient {
         this.apiKeyEnvFallback = apiKey;
     }
 
+    /**
+     * Test-only constructor — preserves the pre-Phase-2 (baseUrl, apiKey)
+     * signature so {@code AnythingLlmClientTest} doesn't have to mock
+     * {@code PlatformSettingsService} at every call site. Production wiring
+     * always uses the 3-arg constructor with the Spring-injected service.
+     */
+    AnythingLlmClient(String baseUrl, String apiKey) {
+        this(null, baseUrl, apiKey);
+    }
+
     /** Resolve from platform_settings → env fallback. Per-call (no cache) so admin
      *  rotations land immediately. */
     private String baseUrl() {
-        return platformSettings.resolveOrFallback("anythingllm.url", baseUrlEnvFallback);
+        return platformSettings != null
+            ? platformSettings.resolveOrFallback("anythingllm.url", baseUrlEnvFallback)
+            : baseUrlEnvFallback;
     }
     private String apiKey() {
-        return platformSettings.resolveOrFallback("anythingllm.api_key", apiKeyEnvFallback);
+        return platformSettings != null
+            ? platformSettings.resolveOrFallback("anythingllm.api_key", apiKeyEnvFallback)
+            : apiKeyEnvFallback;
     }
 
     public boolean isConfigured() {
