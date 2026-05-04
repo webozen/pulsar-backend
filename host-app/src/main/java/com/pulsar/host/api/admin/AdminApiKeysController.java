@@ -4,6 +4,7 @@ import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import com.pulsar.kernel.credentials.OpenDentalKeyResolver;
 import com.pulsar.kernel.credentials.PlaudKeyResolver;
 import com.pulsar.kernel.credentials.TwilioCredentialsResolver;
+import com.pulsar.kernel.credentials.ZoomPhoneCredentialsResolver;
 import com.pulsar.kernel.tenant.TenantRecord;
 import com.pulsar.kernel.tenant.TenantRepository;
 import org.springframework.http.HttpStatus;
@@ -29,25 +30,29 @@ public class AdminApiKeysController {
     private final OpenDentalKeyResolver opendentalKeyResolver;
     private final TwilioCredentialsResolver twilioResolver;
     private final PlaudKeyResolver plaudResolver;
+    private final ZoomPhoneCredentialsResolver zoomPhoneResolver;
 
     public AdminApiKeysController(
         TenantRepository tenantRepo,
         GeminiKeyResolver geminiKeyResolver,
         OpenDentalKeyResolver opendentalKeyResolver,
         TwilioCredentialsResolver twilioResolver,
-        PlaudKeyResolver plaudResolver
+        PlaudKeyResolver plaudResolver,
+        ZoomPhoneCredentialsResolver zoomPhoneResolver
     ) {
         this.tenantRepo = tenantRepo;
         this.geminiKeyResolver = geminiKeyResolver;
         this.opendentalKeyResolver = opendentalKeyResolver;
         this.twilioResolver = twilioResolver;
         this.plaudResolver = plaudResolver;
+        this.zoomPhoneResolver = zoomPhoneResolver;
     }
 
     public record GeminiKeyRequest(String apiKey, Boolean useDefault) {}
     public record OpenDentalKeysRequest(String developerKey, String customerKey) {}
     public record TwilioCredsRequest(String accountSid, String authToken, String fromNumber) {}
     public record PlaudKeyRequest(String bearerToken) {}
+    public record ZoomPhoneCredsRequest(String accountId, String clientId, String clientSecret, String fromNumber) {}
 
     @GetMapping
     public Map<String, Object> get(@PathVariable long id) {
@@ -116,6 +121,29 @@ public class AdminApiKeysController {
         return buildStatusResponse(tenant.dbName());
     }
 
+    @PutMapping("/zoom-phone")
+    public Map<String, Object> updateZoomPhone(@PathVariable long id, @RequestBody ZoomPhoneCredsRequest req) {
+        AdminGuard.requireAdmin();
+        TenantRecord tenant = resolveTenant(id);
+        zoomPhoneResolver.update(
+            tenant.dbName(),
+            req.accountId()    == null ? null : req.accountId().trim(),
+            req.clientId()     == null ? null : req.clientId().trim(),
+            req.clientSecret(),   // blank = leave untouched
+            req.fromNumber()   == null ? null : req.fromNumber().trim(),
+            null, "super_admin"
+        );
+        return buildStatusResponse(tenant.dbName());
+    }
+
+    @DeleteMapping("/zoom-phone")
+    public Map<String, Object> clearZoomPhone(@PathVariable long id) {
+        AdminGuard.requireAdmin();
+        TenantRecord tenant = resolveTenant(id);
+        zoomPhoneResolver.clearAll(tenant.dbName(), null, "super_admin");
+        return buildStatusResponse(tenant.dbName());
+    }
+
     private Map<String, Object> buildStatusResponse(String dbName) {
         Map<String, Object> gemini = new LinkedHashMap<>();
         var gStatus = geminiKeyResolver.statusForDb(dbName);
@@ -137,12 +165,20 @@ public class AdminApiKeysController {
         Map<String, Object> plaud = new LinkedHashMap<>();
         plaud.put("hasToken", plaudResolver.statusForDb(dbName).hasToken());
 
+        Map<String, Object> zoomPhone = new LinkedHashMap<>();
+        var zpStatus = zoomPhoneResolver.statusForDb(dbName);
+        zoomPhone.put("hasAccountId",    zpStatus.hasAccountId());
+        zoomPhone.put("hasClientId",     zpStatus.hasClientId());
+        zoomPhone.put("hasClientSecret", zpStatus.hasClientSecret());
+        zoomPhone.put("hasFromNumber",   zpStatus.hasFromNumber());
+
         Map<String, Object> resp = new LinkedHashMap<>();
         Map<String, Object> providers = new LinkedHashMap<>();
         providers.put("gemini", gemini);
         providers.put("opendental", opendental);
         providers.put("twilio", twilio);
         providers.put("plaud", plaud);
+        providers.put("zoom-phone", zoomPhone);
         resp.put("providers", providers);
         return resp;
     }

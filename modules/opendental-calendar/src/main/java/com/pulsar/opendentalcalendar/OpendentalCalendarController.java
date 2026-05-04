@@ -3,7 +3,6 @@ package com.pulsar.opendentalcalendar;
 import com.pulsar.kernel.auth.Principal;
 import com.pulsar.kernel.auth.PrincipalContext;
 import com.pulsar.kernel.credentials.OpenDentalKeyResolver;
-import com.pulsar.kernel.credentials.TwilioCredentialsResolver;
 import com.pulsar.kernel.security.RequireModule;
 import com.pulsar.kernel.tenant.TenantContext;
 import com.pulsar.kernel.tenant.TenantDataSources;
@@ -33,22 +32,19 @@ public class OpendentalCalendarController {
 
     private final TenantDataSources tenantDs;
     private final OdCalendarQueryClient client;
-    private final OdCalendarSmsClient smsClient;
     private final OpenDentalKeyResolver opendentalKeyResolver;
-    private final TwilioCredentialsResolver twilioResolver;
+    private final SmsDispatcher smsDispatcher;
 
     public OpendentalCalendarController(
         TenantDataSources tenantDs,
         OdCalendarQueryClient client,
-        OdCalendarSmsClient smsClient,
         OpenDentalKeyResolver opendentalKeyResolver,
-        TwilioCredentialsResolver twilioResolver
+        SmsDispatcher smsDispatcher
     ) {
         this.tenantDs = tenantDs;
         this.client = client;
-        this.smsClient = smsClient;
         this.opendentalKeyResolver = opendentalKeyResolver;
-        this.twilioResolver = twilioResolver;
+        this.smsDispatcher = smsDispatcher;
     }
 
     @GetMapping("/config")
@@ -206,12 +202,12 @@ public class OpendentalCalendarController {
     @GetMapping("/sms-config")
     public Map<String, Object> getSmsConfig() {
         var t = TenantContext.require();
-        TwilioCredentialsResolver.Status creds = twilioResolver.statusForDb(t.dbName());
+        String activeProvider = smsDispatcher.activeProvider(t.dbName());
         Map<String, Object> settings = loadSmsSettings();
 
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("enabled", creds.isComplete());
-        result.put("twilioConfigured", creds.isComplete());
+        result.put("enabled", !activeProvider.equals("none"));
+        result.put("smsProvider", activeProvider);
         // Settings stay surfaced for the templates form; credential fields are no
         // longer returned here (they live in /api/{admin,tenant}/credentials/twilio).
         result.put("templateConfirm",  settings.getOrDefault("template_confirm", ""));
@@ -246,10 +242,11 @@ public class OpendentalCalendarController {
     @PostMapping("/patients/{patNum}/preview-sms")
     public Map<String, Object> previewSms(@PathVariable long patNum,
             @Valid @RequestBody SmsPreviewRequest req) {
-        TwilioCredentialsResolver.Credentials twilio = twilioResolver.resolveForDb(TenantContext.require().dbName());
-        if (twilio.accountSid() == null || twilio.accountSid().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "SMS not configured");
+        String dbName = TenantContext.require().dbName();
+        if (smsDispatcher.activeProvider(dbName).equals("none")) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "sms_not_configured");
         }
+        String fromNumber = smsDispatcher.fromNumber(dbName);
         Map<String, Object> settings = loadSmsSettings();
         OpenDentalKeyResolver.Keys keys = loadOdKeys();
 
@@ -270,8 +267,9 @@ public class OpendentalCalendarController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Patient has opted out of text messages");
         }
 
-        // TRIAL MODE: always redirect to trial number regardless of patient phone.
-        String toNumber = "+15198002773";
+        // TRIAL MODE: redirect to provider-specific trial number.
+        String toNumber = "zoom-phone".equals(smsDispatcher.activeProvider(dbName))
+            ? "+14014510630" : "+15198002773";
 
         String template;
         String type = req.type();
@@ -348,10 +346,6 @@ public class OpendentalCalendarController {
     @PostMapping("/patients/{patNum}/send-sms")
     public Map<String, Object> sendSms(@PathVariable long patNum,
             @Valid @RequestBody SmsSendRequest req) {
-        TwilioCredentialsResolver.Credentials twilio = twilioResolver.resolveForDb(TenantContext.require().dbName());
-        if (!twilio.isComplete()) {
-            throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "SMS not configured");
-        }
         OpenDentalKeyResolver.Keys keys = loadOdKeys();
 
         List<Map<String, Object>> patRows;
@@ -376,13 +370,16 @@ public class OpendentalCalendarController {
         if (rawPhone == null || rawPhone.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No phone number on file");
         }
-        // TRIAL MODE: always redirect to trial number regardless of patient phone.
-        String toNumber = "+15198002773";
-
+        String dbName = TenantContext.require().dbName();
+        // TRIAL MODE: redirect to provider-specific trial number.
+        String toNumber = "zoom-phone".equals(smsDispatcher.activeProvider(dbName))
+            ? "+14014510630" : "+15198002773";
         try {
-            smsClient.send(twilio.accountSid(), twilio.authToken(), twilio.fromNumber(), toNumber, req.body());
-        } catch (OdCalendarSmsClient.TwilioException | IOException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+            smsDispatcher.send(dbName, toNumber, req.body());
+        } catch (SmsDispatcher.SmsNotConfiguredException e) {
+            throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "sms_not_configured");
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "sms_send_failed: " + e.getMessage());
         }
         return Map.of("sent", true, "to", toNumber);
     }
