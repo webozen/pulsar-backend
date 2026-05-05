@@ -192,10 +192,11 @@ public class OpendentalCalendarController {
         @NotBlank String templateReminder,
         @NotBlank String templateReview,
         String clinicName,
-        String clinicAddress
+        String clinicAddress,
+        String clinicPhone
     ) {}
 
-    public record SmsPreviewRequest(@NotBlank String type, @NotBlank String aptDateTime) {}
+    public record SmsPreviewRequest(@NotBlank String type, long aptNum) {}
 
     public record SmsSendRequest(@NotBlank String body) {}
 
@@ -215,6 +216,7 @@ public class OpendentalCalendarController {
         result.put("templateReview",   settings.getOrDefault("template_review", ""));
         result.put("clinicName",       settings.getOrDefault("clinic_name", ""));
         result.put("clinicAddress",    settings.getOrDefault("clinic_address", ""));
+        result.put("clinicPhone",      settings.getOrDefault("clinic_phone", ""));
         return result;
     }
 
@@ -224,17 +226,19 @@ public class OpendentalCalendarController {
         JdbcTemplate jdbc = new JdbcTemplate(tenantDs.forDb(t.dbName()));
         jdbc.update(
             "INSERT INTO opendental_calendar_sms_config " +
-            "(id, template_confirm, template_reminder, template_review, clinic_name, clinic_address) " +
-            "VALUES (1, ?, ?, ?, ?, ?) " +
+            "(id, template_confirm, template_reminder, template_review, clinic_name, clinic_address, clinic_phone) " +
+            "VALUES (1, ?, ?, ?, ?, ?, ?) " +
             "ON DUPLICATE KEY UPDATE " +
             "template_confirm = VALUES(template_confirm), " +
             "template_reminder = VALUES(template_reminder), " +
             "template_review = VALUES(template_review), " +
             "clinic_name = VALUES(clinic_name), " +
-            "clinic_address = VALUES(clinic_address)",
+            "clinic_address = VALUES(clinic_address), " +
+            "clinic_phone = VALUES(clinic_phone)",
             req.templateConfirm(), req.templateReminder(), req.templateReview(),
-            req.clinicName() != null ? req.clinicName() : "",
-            req.clinicAddress() != null ? req.clinicAddress() : ""
+            req.clinicName()    != null ? req.clinicName()    : "",
+            req.clinicAddress() != null ? req.clinicAddress() : "",
+            req.clinicPhone()   != null ? req.clinicPhone()   : ""
         );
         return Map.of("saved", true);
     }
@@ -253,7 +257,7 @@ public class OpendentalCalendarController {
         List<Map<String, Object>> patRows;
         try {
             patRows = client.query(keys.developerKey(), keys.customerKey(),
-                "SELECT FName, TxtMsgOk, WirelessPhone, HmPhone FROM patient WHERE PatNum = " + patNum);
+                "SELECT FName, LName, TxtMsgOk, WirelessPhone, HmPhone FROM patient WHERE PatNum = " + patNum);
         } catch (IOException | OdCalendarQueryClient.OdException e) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
         }
@@ -284,61 +288,99 @@ public class OpendentalCalendarController {
         }
         if (template == null) template = "";
 
-        DateTimeFormatter inputFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-        LocalDateTime aptDt;
-        try {
-            aptDt = LocalDateTime.parse(req.aptDateTime(), inputFmt);
-        } catch (java.time.format.DateTimeParseException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "Invalid aptDateTime format: expected yyyy-MM-dd HH:mm:ss");
-        }
-        String datePart = aptDt.format(DateTimeFormatter.ofPattern("EEEE, MMMM d", java.util.Locale.US));
-        String timePart = aptDt.format(DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.US));
-
         String fName = pat.get("FName") != null ? (String) pat.get("FName") : "";
+        String lName = pat.get("LName") != null ? (String) pat.get("LName") : "";
+        String datePart = "";
+        String timePart = "";
         String clinicName = "";
         String clinicAddress = "";
         String clinicPhone = "";
+        // Fetch appointment — AptDateTime + ClinicNum
+        List<Map<String, Object>> aptRows;
         try {
-            String aptDate = req.aptDateTime().substring(0, 10);
-            String aptTime = req.aptDateTime().substring(11);
-            var clinicRows = client.query(keys.developerKey(), keys.customerKey(),
-                "SELECT c.Description, c.Address, c.City, c.State, c.Zip, c.Phone " +
-                "FROM appointment a " +
-                "LEFT JOIN clinic c ON a.ClinicNum = c.ClinicNum " +
-                "WHERE a.PatNum = " + patNum + " " +
-                "AND DATE(a.AptDateTime) = '" + aptDate + "' " +
-                "AND TIME(a.AptDateTime) = '" + aptTime + "' " +
-                "LIMIT 1");
-            if (!clinicRows.isEmpty()) {
-                var c = clinicRows.get(0);
-                clinicName    = c.get("Description") != null ? String.valueOf(c.get("Description")) : "";
-                String addr   = c.get("Address")     != null ? String.valueOf(c.get("Address"))     : "";
-                String city   = c.get("City")        != null ? String.valueOf(c.get("City"))        : "";
-                String state  = c.get("State")       != null ? String.valueOf(c.get("State"))       : "";
-                String zip    = c.get("Zip")         != null ? String.valueOf(c.get("Zip"))         : "";
-                clinicPhone   = c.get("Phone")       != null ? String.valueOf(c.get("Phone"))       : "";
-                clinicAddress = java.util.stream.Stream.of(addr, city, state, zip)
-                    .filter(s -> s != null && !s.isBlank()).collect(java.util.stream.Collectors.joining(", "));
+            aptRows = client.query(keys.developerKey(), keys.customerKey(),
+                "SELECT AptDateTime, ClinicNum FROM appointment WHERE AptNum = " + req.aptNum());
+        } catch (Exception e) {
+            aptRows = java.util.Collections.emptyList();
+        }
+        if (aptRows.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Appointment not found");
+        }
+
+        // Parse AptDateTime — normalize OD formats ("2026-05-05T14:30:00", "...00.0", etc.)
+        try {
+            String raw = String.valueOf(aptRows.get(0).get("AptDateTime"));
+            String normalized = raw.replace('T', ' ').replaceAll("\\.\\d+$", "").trim();
+            LocalDateTime aptDt = LocalDateTime.parse(normalized,
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            datePart = aptDt.format(DateTimeFormatter.ofPattern("EEEE, MMMM d", java.util.Locale.US));
+            timePart = aptDt.format(DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.US));
+        } catch (Exception ignored) {}
+
+        // Fetch clinic — independent of datetime parse so a bad format doesn't lose clinic data
+        try {
+            long clinicNum = aptRows.get(0).get("ClinicNum") != null
+                ? Long.parseLong(String.valueOf(aptRows.get(0).get("ClinicNum"))) : 0L;
+
+            if (clinicNum != 0) {
+                var clinicRows = client.query(keys.developerKey(), keys.customerKey(),
+                    "SELECT Description, Address, City, State, Zip, Phone FROM clinic WHERE ClinicNum = " + clinicNum);
+                if (!clinicRows.isEmpty()) {
+                    var c = clinicRows.get(0);
+                    clinicName  = c.get("Description") != null ? String.valueOf(c.get("Description")) : "";
+                    String addr = c.get("Address")     != null ? String.valueOf(c.get("Address"))     : "";
+                    String city = c.get("City")        != null ? String.valueOf(c.get("City"))        : "";
+                    String state= c.get("State")       != null ? String.valueOf(c.get("State"))       : "";
+                    String zip  = c.get("Zip")         != null ? String.valueOf(c.get("Zip"))         : "";
+                    clinicPhone = c.get("Phone")       != null ? String.valueOf(c.get("Phone"))       : "";
+                    clinicAddress = java.util.stream.Stream.of(addr, city, state, zip)
+                        .filter(s -> !s.isBlank()).collect(java.util.stream.Collectors.joining(", "));
+                }
+            }
+            if (clinicName.isBlank()) {
+                // Single-location: practice info in OD preference table
+                var prefRows = client.query(keys.developerKey(), keys.customerKey(),
+                    "SELECT PrefName, ValueString FROM preference " +
+                    "WHERE PrefName IN ('PracticeTitle','PracticeAddress','PracticeCity','PracticeState','PracticeZip','PracticePhone')");
+                java.util.Map<String, String> prefs = new java.util.HashMap<>();
+                for (var row : prefRows) {
+                    prefs.put(String.valueOf(row.get("PrefName")),
+                              row.get("ValueString") != null ? String.valueOf(row.get("ValueString")) : "");
+                }
+                clinicName  = prefs.getOrDefault("PracticeTitle", "");
+                clinicPhone = prefs.getOrDefault("PracticePhone", "");
+                clinicAddress = java.util.stream.Stream.of(
+                        prefs.getOrDefault("PracticeAddress", ""),
+                        prefs.getOrDefault("PracticeCity", ""),
+                        prefs.getOrDefault("PracticeState", ""),
+                        prefs.getOrDefault("PracticeZip", ""))
+                    .filter(s -> !s.isBlank()).collect(java.util.stream.Collectors.joining(", "));
             }
         } catch (Exception ignored) {}
-        // Fall back to settings values if OD clinic lookup returned nothing
+        // Last resort: manual overrides saved in our settings form
         if (clinicName.isBlank())    clinicName    = settings.get("clinic_name")    != null ? (String) settings.get("clinic_name")    : "";
         if (clinicAddress.isBlank()) clinicAddress = settings.get("clinic_address") != null ? (String) settings.get("clinic_address") : "";
+        if (clinicPhone.isBlank())   clinicPhone   = settings.get("clinic_phone")   != null ? (String) settings.get("clinic_phone")   : "";
+
+        String fullName = (fName + " " + lName).trim();
+        String resolvedClinic = clinicName.isBlank() ? "our clinic" : clinicName;
 
         String preview = template
-            .replace("{patientName}", fName)
-            .replace("{clinicName}", clinicName.isBlank() ? "our clinic" : clinicName)
-            .replace("{clinicAddress}", clinicAddress)
-            .replace("{clinicPhone}", clinicPhone)
+            .replace("{firstName}",       fName)
+            .replace("{lastName}",        lName)
+            .replace("{patientName}",     fullName)
+            .replace("{clinicName}",      resolvedClinic)
+            .replace("{clinicAddress}",   clinicAddress)
+            .replace("{clinicPhone}",     clinicPhone)
             .replace("{appointmentDate}", datePart)
             .replace("{appointmentTime}", timePart)
-            .replace("{name}", fName)
-            .replace("{clinic}", clinicName.isBlank() ? "our clinic" : clinicName)
+            // short aliases kept for backwards compat
+            .replace("{name}",    fName)
+            .replace("{clinic}",  resolvedClinic)
             .replace("{address}", clinicAddress)
-            .replace("{phone}", clinicPhone)
-            .replace("{date}", datePart)
-            .replace("{time}", timePart);
+            .replace("{phone}",   clinicPhone)
+            .replace("{date}",    datePart)
+            .replace("{time}",    timePart);
 
         return Map.of("to", toNumber, "preview", preview);
     }
