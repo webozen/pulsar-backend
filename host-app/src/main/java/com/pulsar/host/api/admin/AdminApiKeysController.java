@@ -1,5 +1,6 @@
 package com.pulsar.host.api.admin;
 
+import com.pulsar.kernel.credentials.CredentialsService;
 import com.pulsar.kernel.credentials.GeminiKeyResolver;
 import com.pulsar.kernel.credentials.OpenDentalKeyResolver;
 import com.pulsar.kernel.credentials.PlaudKeyResolver;
@@ -7,12 +8,15 @@ import com.pulsar.kernel.credentials.TwilioCredentialsResolver;
 import com.pulsar.kernel.credentials.ZoomPhoneCredentialsResolver;
 import com.pulsar.kernel.tenant.TenantRecord;
 import com.pulsar.kernel.tenant.TenantRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Per-tenant credential management for the super-admin UI. The actual
@@ -25,12 +29,24 @@ import java.util.Map;
 @RequestMapping("/api/admin/tenants/{id}/api-keys")
 public class AdminApiKeysController {
 
+    private static final Logger log = LoggerFactory.getLogger(AdminApiKeysController.class);
+
+    /** Allow-list — refuses reveal for any provider/key not declared by a resolver. */
+    private static final Map<String, Set<String>> REVEALABLE = Map.of(
+        "gemini",     Set.of("api_key"),
+        "opendental", Set.of("developer_key", "customer_key"),
+        "twilio",     Set.of("account_sid", "auth_token", "from_number"),
+        "plaud",      Set.of("bearer_token"),
+        "zoom-phone", Set.of("account_id", "client_id", "client_secret", "from_number")
+    );
+
     private final TenantRepository tenantRepo;
     private final GeminiKeyResolver geminiKeyResolver;
     private final OpenDentalKeyResolver opendentalKeyResolver;
     private final TwilioCredentialsResolver twilioResolver;
     private final PlaudKeyResolver plaudResolver;
     private final ZoomPhoneCredentialsResolver zoomPhoneResolver;
+    private final CredentialsService credentials;
 
     public AdminApiKeysController(
         TenantRepository tenantRepo,
@@ -38,7 +54,8 @@ public class AdminApiKeysController {
         OpenDentalKeyResolver opendentalKeyResolver,
         TwilioCredentialsResolver twilioResolver,
         PlaudKeyResolver plaudResolver,
-        ZoomPhoneCredentialsResolver zoomPhoneResolver
+        ZoomPhoneCredentialsResolver zoomPhoneResolver,
+        CredentialsService credentials
     ) {
         this.tenantRepo = tenantRepo;
         this.geminiKeyResolver = geminiKeyResolver;
@@ -46,6 +63,7 @@ public class AdminApiKeysController {
         this.twilioResolver = twilioResolver;
         this.plaudResolver = plaudResolver;
         this.zoomPhoneResolver = zoomPhoneResolver;
+        this.credentials = credentials;
     }
 
     public record GeminiKeyRequest(String apiKey, Boolean useDefault) {}
@@ -142,6 +160,35 @@ public class AdminApiKeysController {
         TenantRecord tenant = resolveTenant(id);
         zoomPhoneResolver.clearAll(tenant.dbName(), null, "super_admin");
         return buildStatusResponse(tenant.dbName());
+    }
+
+    /**
+     * Decrypts and returns the actual stored value for one (provider, key) pair.
+     * Super-admin only. Always logs an audit line so reveal events are traceable
+     * in stdout. Allow-list refuses unknown providers so the endpoint can't be
+     * used to probe arbitrary table contents.
+     */
+    @GetMapping("/reveal/{provider}/{keyName}")
+    public Map<String, Object> reveal(@PathVariable long id,
+                                      @PathVariable String provider,
+                                      @PathVariable String keyName) {
+        AdminGuard.requireAdmin();
+        Set<String> allowedKeys = REVEALABLE.get(provider);
+        if (allowedKeys == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unknown_provider: " + provider);
+        }
+        if (!allowedKeys.contains(keyName)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "unknown_key_for_provider: " + provider + "/" + keyName);
+        }
+        TenantRecord tenant = resolveTenant(id);
+        CredentialsService.Resolution res = credentials.resolve(tenant.dbName(), provider, keyName);
+        log.info("audit credential_reveal tenant_id={} slug={} provider={} key={} source={} present={}",
+            tenant.id(), tenant.slug(), provider, keyName, res.source(), res.isPresent());
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("value", res.value());
+        out.put("source", res.source().name());
+        return out;
     }
 
     private Map<String, Object> buildStatusResponse(String dbName) {
